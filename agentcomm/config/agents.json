@@ -1,0 +1,65 @@
+[
+  {
+    "id": "interview_prep",
+    "name": "Interview Prep Agent",
+    "description": "Helps prepare for technical interviews",
+    "url": "http://localhost:10001/",
+    "capabilities": {
+      "streaming": true,
+      "push_notifications": true,
+      "file_upload": false,
+      "tool_use": false
+    },
+    "authentication": {
+      "auth_type": "api_key",
+      "api_key_name": "X-API-Key",
+      "token": ""
+    },
+    "default_input_modes": ["text/plain"],
+    "default_output_modes": ["text/plain"],
+    "is_default": true,
+    "is_built_in": true
+  },
+  {
+    "id": "code_assistant",
+    "name": "Code Assistant Agent",
+    "description": "Helps with coding tasks and software development",
+    "url": "http://localhost:10002/",
+    "capabilities": {
+      "streaming": true,
+      "push_notifications": false,
+      "file_upload": true,
+      "tool_use": true
+    },
+    "authentication": {
+      "auth_type": "bearer",
+      "api_key_name": null,
+      "token": ""
+    },
+    "default_input_modes": ["text/plain", "application/json"],
+    "default_output_modes": ["text/plain", "text/markdown"],
+    "is_default": false,
+    "is_built_in": true
+  },
+  {
+    "id": "research_agent",
+    "name": "Research Agent",
+    "description": "Helps with research tasks and information gathering",
+    "url": "http://localhost:10003/",
+    "capabilities": {
+      "streaming": true,
+      "push_notifications": true,
+      "file_upload": true,
+      "tool_use": true
+    },
+    "authentication": {
+      "auth_type": "api_key",
+      "api_key_name": "X-API-Key",
+      "token": ""
+    },
+    "default_input_modes": ["text/plain"],
+    "default_output_modes": ["text/plain", "text/markdown"],
+    "is_default": false,
+    "is_built_in": true
+  }
+]
