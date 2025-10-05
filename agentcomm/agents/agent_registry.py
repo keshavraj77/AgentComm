@@ -92,7 +92,7 @@ class AgentAuthentication:
 
 class Agent:
     """Agent model"""
-    
+
     def __init__(
         self,
         id: str,
@@ -103,6 +103,7 @@ class Agent:
         authentication: AgentAuthentication,
         default_input_modes: List[str],
         default_output_modes: List[str],
+        transport: str = "jsonrpc",
         skills: Optional[List[Dict[str, Any]]] = None,
         is_default: bool = False,
         is_built_in: bool = True
@@ -111,6 +112,7 @@ class Agent:
         self.name = name
         self.description = description
         self.url = url
+        self.transport = transport  # "jsonrpc", "grpc", "http"
         self.capabilities = capabilities
         self.authentication = authentication
         self.default_input_modes = default_input_modes
@@ -127,6 +129,7 @@ class Agent:
             name=data.get('name', ''),
             description=data.get('description', ''),
             url=data.get('url', ''),
+            transport=data.get('transport', 'jsonrpc'),
             capabilities=AgentCapabilities.from_dict(data.get('capabilities', {})),
             authentication=AgentAuthentication.from_dict(data.get('authentication', {})),
             default_input_modes=data.get('default_input_modes', ['text/plain']),
@@ -143,6 +146,7 @@ class Agent:
             'name': self.name,
             'description': self.description,
             'url': self.url,
+            'transport': self.transport,
             'capabilities': self.capabilities.to_dict(),
             'authentication': self.authentication.to_dict(),
             'default_input_modes': self.default_input_modes,

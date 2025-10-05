@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, AsyncGenerator, List, Callable, Union
 
 from agentcomm.agents.agent_registry import Agent, AgentRegistry
 from agentcomm.agents.a2a_client import A2AClient, Message
+from agentcomm.agents.a2a_sdk_client import A2ASDKClientWrapper
 from agentcomm.agents.webhook_handler import WebhookHandler
 
 logger = logging.getLogger(__name__)
@@ -17,16 +18,25 @@ class AgentComm:
     """
     Simplified wrapper for agent communication
     """
-    
-    def __init__(self, agent: Agent):
+
+    def __init__(self, agent: Agent, use_sdk: bool = True):
         """
         Initialize the agent communication wrapper
-        
+
         Args:
             agent: Agent to communicate with
+            use_sdk: Whether to use the official A2A SDK (default: True)
         """
         self.agent = agent
-        self.a2a_client = A2AClient()
+        self.use_sdk = use_sdk
+
+        if use_sdk:
+            self.a2a_sdk_client = A2ASDKClientWrapper()
+            self.a2a_client = None
+        else:
+            self.a2a_client = A2AClient()
+            self.a2a_sdk_client = None
+
         self.context_id: Optional[str] = None
         self.last_response: Optional[str] = None
         self.last_task_id: Optional[str] = None
@@ -34,152 +44,374 @@ class AgentComm:
     async def send_message(self, message: str) -> str:
         """
         Send a message to the agent and return the complete response
-        
+
         Args:
             message: Message to send
-            
+
         Returns:
             Complete response from the agent
         """
         try:
-            # Prepare the message
-            msg = Message(
-                content=message,
-                content_type="text/plain",
-                message_id=str(uuid.uuid4()),
-                role="user",
-                context_id=self.context_id
-            )
-            
-            # Get authentication headers
-            auth_headers = self.agent.authentication.get_headers()
-            
-            # Send the message
             response_text = ""
-            async for response in self.a2a_client.send_message(
-                agent_url=self.agent.url,
-                message=msg,
-                context_id=self.context_id,
-                auth_headers=auth_headers
-            ):
-                # Process the response
-                if "result" in response and isinstance(response["result"], dict):
-                    result = response["result"]
-                    
-                    # Check if the result is a message
-                    if "kind" in result and result["kind"] == "message":
-                        if "content" in result:
-                            response_text = result["content"]
-                    
-                    # Check if the result is a task
-                    elif "kind" in result and result["kind"] == "task":
-                        self.last_task_id = result["id"]
-                        
-                        # Check if the task has artifacts with content
-                        if "artifacts" in result and isinstance(result["artifacts"], list):
-                            for artifact in result["artifacts"]:
-                                if "parts" in artifact and isinstance(artifact["parts"], list):
-                                    for part in artifact["parts"]:
-                                        if "content" in part:
-                                            response_text += part["content"]
-            
-            # Store the context ID for future messages if available in the last response
-            last_response = None
-            async for response in self.a2a_client.send_message(
-                agent_url=self.agent.url,
-                message=msg,
-                context_id=self.context_id,
-                auth_headers=auth_headers
-            ):
-                last_response = response
-            
-            if last_response and "context" in last_response and "id" in last_response["context"]:
-                self.context_id = last_response["context"]["id"]
-            
-            # Store the response
+
+            if self.use_sdk and self.a2a_sdk_client:
+                # Use the official A2A SDK
+                async for response in self.a2a_sdk_client.send_message(
+                    agent_url=self.agent.url,
+                    message=message,
+                    transport=self.agent.transport,
+                    auth_type=self.agent.authentication.auth_type,
+                    api_key_name=self.agent.authentication.api_key_name,
+                    token=self.agent.authentication.token,
+                    context_id=self.context_id
+                ):
+                    if "result" in response:
+                        result = response["result"]
+                        # Extract text from response
+                        if hasattr(result, 'parts'):
+                            for part in result.parts:
+                                if hasattr(part, 'text'):
+                                    response_text += part.text
+                        elif isinstance(result, dict):
+                            # Handle dict responses
+                            if "content" in result:
+                                response_text = result["content"]
+                            elif "text" in result:
+                                response_text = result["text"]
+
+                        # Extract context ID
+                        if hasattr(result, 'context_id'):
+                            self.context_id = result.context_id
+                        elif isinstance(result, dict) and "contextId" in result:
+                            self.context_id = result["contextId"]
+
+            else:
+                # Use legacy client
+                msg = Message(
+                    content=message,
+                    content_type="text/plain",
+                    message_id=str(uuid.uuid4()),
+                    role="user",
+                    context_id=self.context_id
+                )
+
+                auth_headers = self.agent.authentication.get_headers()
+
+                async for response in self.a2a_client.send_message(
+                    agent_url=self.agent.url,
+                    message=msg,
+                    context_id=self.context_id,
+                    auth_headers=auth_headers
+                ):
+                    if "result" in response and isinstance(response["result"], dict):
+                        result = response["result"]
+
+                        if "kind" in result and result["kind"] == "message":
+                            if "content" in result:
+                                response_text = result["content"]
+
+                        elif "kind" in result and result["kind"] == "task":
+                            self.last_task_id = result["id"]
+
+                            if "artifacts" in result and isinstance(result["artifacts"], list):
+                                for artifact in result["artifacts"]:
+                                    if "parts" in artifact and isinstance(artifact["parts"], list):
+                                        for part in artifact["parts"]:
+                                            if "content" in part:
+                                                response_text += part["content"]
+
+                    if "context" in response and "id" in response["context"]:
+                        self.context_id = response["context"]["id"]
+
             self.last_response = response_text
-            
+
+            # If we didn't get any response, return a generic error message
+            if not response_text:
+                error_msg = "Unable to get a response from the agent. Please try again."
+                logger.warning(f"No response text received from agent. Returning generic error message.")
+                self.last_response = error_msg
+                return error_msg
+
             return response_text
-        
+
         except Exception as e:
-            logger.error(f"Error sending message to agent: {e}")
-            return f"Error: {e}"
+            logger.error(f"Error sending message to agent: {e}", exc_info=True)
+            error_msg = f"Error communicating with agent: {str(e)}. Please try again."
+            self.last_response = error_msg
+            return error_msg
     
     async def send_message_stream(self, message: str) -> AsyncGenerator[str, None]:
         """
         Send a message to the agent and stream the response
-        
+
         Args:
             message: Message to send
-            
+
         Yields:
             Response chunks from the agent
         """
         try:
-            # Prepare the message
-            msg = Message(
-                content=message,
-                content_type="text/plain",
-                message_id=str(uuid.uuid4()),
-                role="user",
-                context_id=self.context_id
-            )
-            
-            # Get authentication headers
-            auth_headers = self.agent.authentication.get_headers()
-            
-            # Send the message
             response_text = ""
-            async for response in self.a2a_client.send_streaming_message(
-                agent_url=self.agent.url,
-                message=msg,
-                context_id=self.context_id,
-                auth_headers=auth_headers
-            ):
-                # Process the response
-                if "result" in response and isinstance(response["result"], dict):
-                    result = response["result"]
-                    
-                    # Check if the result is a message
-                    if "kind" in result and result["kind"] == "message":
-                        if "content" in result:
-                            chunk = result["content"]
+            last_task_state = None
+
+            if self.use_sdk and self.a2a_sdk_client:
+                # Use the official A2A SDK
+                logger.info(f"Using A2A SDK to send streaming message")
+                async for response in self.a2a_sdk_client.send_streaming_message(
+                    agent_url=self.agent.url,
+                    message=message,
+                    transport=self.agent.transport,
+                    auth_type=self.agent.authentication.auth_type,
+                    api_key_name=self.agent.authentication.api_key_name,
+                    token=self.agent.authentication.token,
+                    context_id=self.context_id
+                ):
+                    logger.info(f"=== AgentComm received response ===")
+                    logger.info(f"Response keys: {response.keys() if isinstance(response, dict) else 'not a dict'}")
+
+                    if "result" in response:
+                        result = response["result"]
+                        logger.info(f"Processing result of type: {type(result).__name__}")
+                        logger.info(f"Result class module: {type(result).__module__}")
+                        chunk = ""
+
+                        # Handle Message responses directly (not in tuple)
+                        if type(result).__name__ == 'Message' and not isinstance(result, tuple):
+                            logger.info(f"Result is a Message object")
+                            if hasattr(result, 'model_dump'):
+                                logger.info(f"Message dump: {result.model_dump()}")
+
+                            if hasattr(result, 'parts') and result.parts:
+                                logger.info(f"Message has {len(result.parts)} parts")
+                                for idx, part in enumerate(result.parts):
+                                    logger.info(f"Part {idx} type: {type(part).__name__}")
+                                    # Handle Part wrapper with root attribute
+                                    if hasattr(part, 'root'):
+                                        if hasattr(part.root, 'text') and part.root.text:
+                                            chunk += part.root.text
+                                            logger.info(f"✓ Extracted text from message part root: {part.root.text[:100]}...")
+                                    # Direct text/content attributes
+                                    elif hasattr(part, 'text') and part.text:
+                                        chunk += part.text
+                                        logger.info(f"✓ Extracted text from message part: {part.text[:100]}...")
+                                    elif hasattr(part, 'content') and part.content:
+                                        chunk += part.content
+                                        logger.info(f"✓ Extracted content from message part: {part.content[:100]}...")
+
+                        # Handle tuple responses (Task, Event or None)
+                        elif isinstance(result, tuple):
+                            logger.info(f"Result is tuple with {len(result)} elements")
+                            task = result[0] if len(result) > 0 else None
+                            event = result[1] if len(result) > 1 else None
+
+                            logger.info(f"Task type: {type(task).__name__ if task else 'None'}")
+                            logger.info(f"Event type: {type(event).__name__ if event else 'None'}")
+
+                            # Log task details
+                            task_state = 'unknown'
+                            if task:
+                                logger.info(f"Task ID: {task.id if hasattr(task, 'id') else 'unknown'}")
+                                task_state = task.status.state if hasattr(task, 'status') and hasattr(task.status, 'state') else 'unknown'
+                                logger.info(f"Task status: {task_state}")
+
+                                # Log status details
+                                if hasattr(task, 'status'):
+                                    logger.info(f"Status attributes: {[a for a in dir(task.status) if not a.startswith('_')]}")
+                                    if hasattr(task.status, 'message') and task.status.message:
+                                        logger.info(f"Status message: {task.status.message}")
+
+                                # Dump the full task for debugging
+                                if hasattr(task, 'model_dump'):
+                                    task_dict = task.model_dump()
+                                    logger.info(f"Full task dump: {task_dict}")
+
+                            # Log event details
+                            if event:
+                                logger.info(f"Event type: {type(event).__name__}")
+                                if hasattr(event, 'model_dump'):
+                                    event_dict = event.model_dump()
+                                    logger.info(f"Full event dump: {event_dict}")
+
+                            # Check if task is completed
+                            is_completed = str(task_state) == 'TaskState.completed'
+
+                            # If task just transitioned to completed, send a clear signal
+                            if is_completed and last_task_state != 'TaskState.completed':
+                                logger.info(f"Task transitioned to completed - sending CLEAR signal")
+                                yield "<<<CLEAR>>>"
+                                response_text = ""  # Reset accumulated text
+
+                            # Update the last known state
+                            last_task_state = str(task_state)
+
+                            # If task is completed, ONLY extract from artifacts (the final result)
+                            # Don't include status messages in the final output
+                            if is_completed:
+                                logger.info(f"Task completed - extracting ONLY from artifacts")
+                                if task and hasattr(task, 'artifacts') and task.artifacts:
+                                    logger.info(f"Task has {len(task.artifacts)} artifacts")
+                                    for idx, artifact in enumerate(task.artifacts):
+                                        logger.info(f"Artifact {idx}: {artifact}")
+                                        if hasattr(artifact, 'parts') and artifact.parts:
+                                            for part_idx, part in enumerate(artifact.parts):
+                                                logger.info(f"  Part {part_idx} type: {type(part).__name__}")
+                                                # Handle Part wrapper with root attribute
+                                                if hasattr(part, 'root'):
+                                                    if hasattr(part.root, 'text') and part.root.text:
+                                                        chunk += part.root.text
+                                                        logger.info(f"  ✓ Extracted text from artifact part root: {part.root.text[:100]}...")
+                                                # Direct text/content attributes
+                                                elif hasattr(part, 'text') and part.text:
+                                                    chunk += part.text
+                                                    logger.info(f"  ✓ Extracted text from artifact part: {part.text[:100]}...")
+                                                elif hasattr(part, 'content') and part.content:
+                                                    chunk += part.content
+                                                    logger.info(f"  ✓ Extracted content from artifact part: {part.content[:100]}...")
+                            else:
+                                # Task is in progress - extract status messages and/or artifact updates
+                                logger.info(f"Task in progress - extracting status messages and artifact updates")
+
+                                # Extract status messages (e.g., "Processing...")
+                                if task and hasattr(task, 'status'):
+                                    if hasattr(task.status, 'message') and task.status.message:
+                                        # Check if status message is a Message object with parts
+                                        if hasattr(task.status.message, 'parts'):
+                                            logger.info(f"Status message has {len(task.status.message.parts)} parts!")
+                                            for idx, part in enumerate(task.status.message.parts):
+                                                logger.info(f"Part {idx}: {part}")
+                                                logger.info(f"Part {idx} type: {type(part).__name__}")
+
+                                                # Handle Part wrapper with root attribute
+                                                if hasattr(part, 'root'):
+                                                    logger.info(f"Part has 'root' attribute: {type(part.root).__name__}")
+                                                    if hasattr(part.root, 'text') and part.root.text:
+                                                        chunk += part.root.text
+                                                        logger.info(f"✓ Extracted text from status message root: {part.root.text[:100]}...")
+                                                # Direct text attribute
+                                                elif hasattr(part, 'text') and part.text:
+                                                    chunk += part.text
+                                                    logger.info(f"✓ Extracted text from status message: {part.text[:100]}...")
+
+                                # Extract artifact updates (only from event, not task, to avoid duplicates)
+                                if event and hasattr(event, 'artifact') and event.artifact:
+                                    logger.info(f"Event has artifact update - extracting incremental update")
+                                    if hasattr(event.artifact, 'parts'):
+                                        for part in event.artifact.parts:
+                                            # Handle Part wrapper with root attribute
+                                            if hasattr(part, 'root'):
+                                                if hasattr(part.root, 'text') and part.root.text:
+                                                    chunk += part.root.text
+                                                    logger.info(f"✓ Extracted text from event artifact root: {part.root.text[:100]}...")
+                                            # Direct text/content attributes
+                                            elif hasattr(part, 'text') and part.text:
+                                                chunk += part.text
+                                                logger.info(f"✓ Extracted text from event artifact: {part.text[:100]}...")
+                                            elif hasattr(part, 'content') and part.content:
+                                                chunk += part.content
+                                                logger.info(f"✓ Extracted content from event artifact: {part.content[:100]}...")
+
+                            if not chunk and task:
+                                logger.info(f"Task has no artifacts (artifacts={task.artifacts if hasattr(task, 'artifacts') else 'N/A'})")
+
+                        # Handle Message responses
+                        elif hasattr(result, 'parts'):
+                            logger.info(f"Result has 'parts' attribute with {len(result.parts)} parts")
+                            for part in result.parts:
+                                if hasattr(part, 'text'):
+                                    chunk += part.text
+                                    logger.debug(f"Extracted text from part: {part.text[:100]}...")
+
+                        # Handle dict responses
+                        elif isinstance(result, dict):
+                            logger.info(f"Result is dict with keys: {result.keys()}")
+                            if "content" in result:
+                                chunk = result["content"]
+                            elif "text" in result:
+                                chunk = result["text"]
+
+                        # Try to extract from other object types
+                        else:
+                            logger.info(f"Result attributes: {[a for a in dir(result) if not a.startswith('_')]}")
+                            if hasattr(result, 'content'):
+                                chunk = result.content
+                                logger.info(f"Extracted content: {chunk[:100]}...")
+
+                        if chunk:
+                            logger.info(f"✓✓✓ SUCCESS: Yielding chunk of length {len(chunk)}")
+                            logger.info(f"✓✓✓ Chunk preview: {chunk[:200]}...")
                             response_text += chunk
                             yield chunk
-                    
-                    # Check if the result is a task
-                    elif "kind" in result and result["kind"] == "task":
-                        self.last_task_id = result["id"]
-                        
-                        # Check if the task has artifacts with content
-                        if "artifacts" in result and isinstance(result["artifacts"], list):
-                            for artifact in result["artifacts"]:
-                                if "parts" in artifact and isinstance(artifact["parts"], list):
-                                    for part in artifact["parts"]:
-                                        if "content" in part:
-                                            chunk = part["content"]
-                                            response_text += chunk
-                                            yield chunk
-            
-            # Store the context ID for future messages if available in the last response
-            last_response = None
-            async for response in self.a2a_client.send_streaming_message(
-                agent_url=self.agent.url,
-                message=msg,
-                context_id=self.context_id,
-                auth_headers=auth_headers
-            ):
-                last_response = response
-            
-            if last_response and "context" in last_response and "id" in last_response["context"]:
-                self.context_id = last_response["context"]["id"]
-            
-            # Store the response
+                        else:
+                            logger.warning(f"✗✗✗ PROBLEM: No chunk extracted from result")
+                            logger.warning(f"✗✗✗ Result type was: {type(result).__name__}")
+
+                        # Extract context ID
+                        if isinstance(result, tuple) and len(result) > 0:
+                            task = result[0]
+                            if hasattr(task, 'context_id'):
+                                self.context_id = task.context_id
+                        elif hasattr(result, 'context_id'):
+                            self.context_id = result.context_id
+                        elif isinstance(result, dict) and "contextId" in result:
+                            self.context_id = result["contextId"]
+
+            else:
+                # Use legacy client
+                msg = Message(
+                    content=message,
+                    content_type="text/plain",
+                    message_id=str(uuid.uuid4()),
+                    role="user",
+                    context_id=self.context_id
+                )
+
+                auth_headers = self.agent.authentication.get_headers()
+
+                async for response in self.a2a_client.send_streaming_message(
+                    agent_url=self.agent.url,
+                    message=msg,
+                    context_id=self.context_id,
+                    auth_headers=auth_headers
+                ):
+                    if "result" in response and isinstance(response["result"], dict):
+                        result = response["result"]
+                        chunk = ""
+
+                        if "kind" in result and result["kind"] == "message":
+                            if "content" in result:
+                                chunk = result["content"]
+
+                        elif "kind" in result and result["kind"] == "task":
+                            self.last_task_id = result["id"]
+
+                            if "artifacts" in result and isinstance(result["artifacts"], list):
+                                for artifact in result["artifacts"]:
+                                    if "parts" in artifact and isinstance(artifact["parts"], list):
+                                        for part in artifact["parts"]:
+                                            if "content" in part:
+                                                chunk += part["content"]
+
+                        if chunk:
+                            response_text += chunk
+                            yield chunk
+
+                    if "context" in response and "id" in response["context"]:
+                        self.context_id = response["context"]["id"]
+
             self.last_response = response_text
-        
+
+            # If we didn't get any response, send a generic error message
+            if not response_text:
+                error_msg = "Unable to get a response from the agent. Please try again."
+                logger.warning(f"No response text received from agent. Sending generic error message.")
+                yield error_msg
+                self.last_response = error_msg
+
         except Exception as e:
-            logger.error(f"Error sending message to agent: {e}")
-            yield f"Error: {e}"
+            logger.error(f"Error sending message to agent: {e}", exc_info=True)
+            error_msg = f"Error communicating with agent: {str(e)}. Please try again."
+            yield error_msg
+            self.last_response = error_msg
     
     async def get_last_response(self) -> str:
         """
