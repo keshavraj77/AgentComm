@@ -75,18 +75,38 @@ class MessageWidget(QFrame):
         self.setFrameShadow(QFrame.Shadow.Raised)
         self.setLineWidth(1)
         
-        # Set the background color based on the sender
+        # Set modern gradient background based on the sender
         if is_user:
-            self.setStyleSheet("background-color: #d4edff; border-radius: 5px;")
+            self.setStyleSheet("""
+                QFrame {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #667eea, stop:1 #764ba2);
+                    border-radius: 15px;
+                    padding: 5px;
+                }
+            """)
         else:
-            self.setStyleSheet("background-color: #f0f0f0; border-radius: 5px;")
+            self.setStyleSheet("""
+                QFrame {
+                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                        stop:0 #f093fb, stop:1 #f5576c);
+                    border-radius: 15px;
+                    padding: 5px;
+                }
+            """)
         
         # Create the layout
         layout = QVBoxLayout(self)
         
         # Create the sender label
         sender_label = QLabel(sender)
-        sender_label.setStyleSheet("font-weight: bold; color: #333; font-size: 12px;")
+        sender_label.setStyleSheet("""
+            font-weight: bold;
+            color: #ffffff;
+            font-size: 13px;
+            background: transparent;
+            padding: 2px 5px;
+        """)
         layout.addWidget(sender_label)
 
         # Create the message text edit
@@ -94,7 +114,13 @@ class MessageWidget(QFrame):
         message_text.setReadOnly(True)
         message_text.setPlainText(message)
         message_text.setFrameStyle(QFrame.Shape.NoFrame)
-        message_text.setStyleSheet("background-color: transparent; color: #000; font-size: 13px; padding: 0px;")
+        message_text.setStyleSheet("""
+            background-color: transparent;
+            color: #ffffff;
+            font-size: 14px;
+            padding: 5px;
+            border: none;
+        """)
         message_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         message_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -144,6 +170,26 @@ class ChatWidget(QWidget):
         self.chat_scroll_area.setWidgetResizable(True)
         self.chat_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.chat_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.chat_scroll_area.setStyleSheet("""
+            QScrollArea {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #1a202c, stop:1 #2d3748);
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #2d3748;
+                width: 10px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: #667eea;
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #764ba2;
+            }
+        """)
         
         self.chat_container = QWidget()
         self.chat_layout = QVBoxLayout(self.chat_container)
@@ -163,10 +209,45 @@ class ChatWidget(QWidget):
         self.message_input.setPlaceholderText("Type your message here...")
         self.message_input.setAcceptRichText(False)
         self.message_input.setFixedHeight(80)
+        self.message_input.setStyleSheet("""
+            QTextEdit {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #2d3748, stop:1 #1a202c);
+                color: #ffffff;
+                border: 2px solid #4a5568;
+                border-radius: 12px;
+                padding: 10px;
+                font-size: 14px;
+            }
+            QTextEdit:focus {
+                border: 2px solid #667eea;
+            }
+        """)
         self.input_layout.addWidget(self.message_input, 1)
-        
+
         self.send_button = QPushButton("Send")
-        self.send_button.setFixedWidth(80)
+        self.send_button.setFixedWidth(100)
+        self.send_button.setFixedHeight(80)
+        self.send_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-size: 16px;
+                font-weight: bold;
+                padding: 10px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #5a67d8, stop:1 #6b46c1);
+            }
+        """)
         self.send_button.clicked.connect(self.send_message)
         self.input_layout.addWidget(self.send_button)
         

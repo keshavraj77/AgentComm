@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QIcon
+from pathlib import Path
 
 from agentcomm.core.session_manager import SessionManager
 from agentcomm.agents.agent_registry import AgentRegistry
@@ -50,11 +51,65 @@ class MainWindow(QMainWindow):
         self.agent_registry = agent_registry
         self.llm_router = llm_router
         
-        self.setWindowTitle("A2A Client")
-        self.setMinimumSize(800, 600)
-        
+        self.setWindowTitle("AgentComm")
+        self.setMinimumSize(1000, 700)
+
+        # Set window icon
+        logo_path = Path(__file__).parent / "logo.svg"
+        if logo_path.exists():
+            self.setWindowIcon(QIcon(str(logo_path)))
+
+        # Apply modern dark theme to main window
+        self.setStyleSheet("""
+            QMainWindow {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #0f172a, stop:1 #1e293b);
+            }
+            QMenuBar {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #1e293b, stop:1 #0f172a);
+                color: #ffffff;
+                padding: 5px;
+                font-size: 13px;
+            }
+            QMenuBar::item {
+                background: transparent;
+                padding: 8px 15px;
+                border-radius: 5px;
+            }
+            QMenuBar::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+            }
+            QMenu {
+                background: #2d3748;
+                color: #ffffff;
+                border: 2px solid #4a5568;
+                border-radius: 8px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 8px 30px;
+                border-radius: 5px;
+            }
+            QMenu::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+            }
+            QStatusBar {
+                background: #1e293b;
+                color: #ffffff;
+                font-size: 12px;
+            }
+        """)
+
         # Create the central widget
         self.central_widget = QWidget()
+        self.central_widget.setStyleSheet("""
+            QWidget {
+                background: transparent;
+            }
+        """)
         self.setCentralWidget(self.central_widget)
         
         # Create the main layout

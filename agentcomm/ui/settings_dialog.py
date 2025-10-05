@@ -44,8 +44,195 @@ class SettingsDialog(QDialog):
         self.llm_router = llm_router
         
         self.setWindowTitle("Settings")
-        self.setMinimumSize(600, 400)
-        
+        self.setMinimumSize(800, 600)
+
+        # Apply modern dark theme
+        self.setStyleSheet("""
+            QDialog {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #0f172a, stop:1 #1e293b);
+            }
+            QTabWidget::pane {
+                border: 2px solid #4a5568;
+                border-radius: 10px;
+                background: #1e293b;
+                padding: 10px;
+            }
+            QTabBar::tab {
+                background: #2d3748;
+                color: #ffffff;
+                padding: 10px 20px;
+                margin: 2px;
+                border-radius: 8px 8px 0px 0px;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            QTabBar::tab:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+                font-weight: bold;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #4a5568;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 13px;
+            }
+            QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+                background: #2d3748;
+                color: #ffffff;
+                border: 2px solid #4a5568;
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 13px;
+            }
+            QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+                border: 2px solid #667eea;
+                background: #1a202c;
+            }
+            QComboBox::drop-down {
+                border: none;
+                padding-right: 10px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 5px solid #ffffff;
+                width: 0;
+                height: 0;
+            }
+            QComboBox QAbstractItemView {
+                background: #2d3748;
+                color: #ffffff;
+                selection-background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border: 2px solid #4a5568;
+                border-radius: 8px;
+            }
+            QCheckBox {
+                color: #ffffff;
+                font-size: 13px;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 20px;
+                height: 20px;
+                border: 2px solid #4a5568;
+                border-radius: 5px;
+                background: #2d3748;
+            }
+            QCheckBox::indicator:hover {
+                border: 2px solid #667eea;
+            }
+            QCheckBox::indicator:checked {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border: 2px solid #667eea;
+            }
+            QCheckBox::indicator:checked:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+            QGroupBox {
+                color: #ffffff;
+                font-size: 15px;
+                font-weight: bold;
+                border: 2px solid #4a5568;
+                border-radius: 10px;
+                margin-top: 15px;
+                padding-top: 20px;
+                background: rgba(45, 55, 72, 0.3);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 8px 15px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 5px;
+                margin-left: 10px;
+            }
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #1e293b;
+                width: 12px;
+                border-radius: 6px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+            QScrollBar:horizontal {
+                background: #1e293b;
+                height: 12px;
+                border-radius: 6px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 6px;
+                min-width: 20px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: none;
+            }
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+            QPushButton:pressed {
+                background: #5a67d8;
+                padding-top: 12px;
+                padding-bottom: 8px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button,
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+                background: #4a5568;
+                border-radius: 4px;
+                width: 16px;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+            QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+                background: #667eea;
+            }
+        """)
+
         # Create the layout
         self.layout = QVBoxLayout(self)
         
