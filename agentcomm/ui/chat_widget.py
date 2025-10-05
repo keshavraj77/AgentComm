@@ -338,7 +338,7 @@ class ChatWidget(QWidget):
         logger.debug(f"Finalizing streaming message. Total length: {len(self.streaming_response)}")
         for i in range(self.chat_layout.count()):
             widget = self.chat_layout.itemAt(i).widget()
-            if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming"):
+            if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
                 # Update the widget with the final streaming response
                 message_text = widget.findChild(QTextEdit)
                 if message_text and self.streaming_response:
@@ -348,8 +348,8 @@ class ChatWidget(QWidget):
                     message_text.setFixedHeight(min(400, max(30, int(doc_height) + 10)))
                     logger.debug(f"Updated streaming widget with final text: {self.streaming_response[:50]}...")
 
-                # Remove the streaming flag
-                delattr(widget, "is_streaming")
+                # Mark as no longer streaming (don't delete the attribute)
+                widget.is_streaming = False
                 break
     
     
@@ -369,19 +369,22 @@ class ChatWidget(QWidget):
             return
 
         if self.current_entity_id == sender_id:
-            # Check if there's already a streaming widget - if so, just finalize it
+            # Check if there's already a streaming widget - if so, finalize it
             # The streaming response is already being displayed via update_streaming_message
             # We don't need to add a duplicate message
-            has_streaming = False
+            streaming_widget = None
             for i in range(self.chat_layout.count()):
                 widget = self.chat_layout.itemAt(i).widget()
-                if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming"):
-                    has_streaming = True
+                if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
+                    streaming_widget = widget
                     break
 
-            # Only add a new message if there's no streaming widget
-            # (This happens for non-streaming responses)
-            if not has_streaming:
+            if streaming_widget:
+                # Finalize the streaming widget by removing the is_streaming flag
+                streaming_widget.is_streaming = False
+            else:
+                # Only add a new message if there's no streaming widget
+                # (This happens for non-streaming responses)
                 self.add_message_widget(message, sender_id)
     
     @pyqtSlot(str, str, str)

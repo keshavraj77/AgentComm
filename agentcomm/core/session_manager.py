@@ -172,17 +172,16 @@ class SessionManager:
                     async for chunk in self.agent_comm.send_message_stream(message):
                         for callback in self.streaming_callbacks:
                             callback(self.current_agent_id, chunk, "agent")
-                    
+
                     # Get the full response from the agent
                     response = await self.agent_comm.get_last_response()
-                    
+
                     # Add agent response to chat history
                     if history and response:
                         history.add_assistant_message(response)
-                        
-                    # Notify callbacks about the complete agent response
-                    for callback in self.message_callbacks:
-                        callback(self.current_agent_id, response, "agent")
+
+                    # Don't notify message_callbacks for streaming - the UI already has the complete message
+                    # from the streaming chunks
                 else:
                     response = await self.agent_comm.send_message(message)
                     
@@ -208,7 +207,7 @@ class SessionManager:
                     ):
                         for callback in self.streaming_callbacks:
                             callback(self.current_llm_id, chunk, "llm")
-                    
+
                     # Get the full response from the LLM
                     response = await self.llm_router.get_last_response(self.current_llm_id)
                     logger.info(f"LLM response received. Length: {len(response)}")
@@ -217,9 +216,8 @@ class SessionManager:
                     if history and response:
                         history.add_assistant_message(response)
 
-                    # Notify callbacks about the complete LLM response
-                    for callback in self.message_callbacks:
-                        callback(self.current_llm_id, response, "llm")
+                    # Don't notify message_callbacks for streaming - the UI already has the complete message
+                    # from the streaming chunks
                 else:
                     response = await self.llm_router.generate(
                         self.current_llm_id, message, history.get_messages() if history else None,
