@@ -21,37 +21,53 @@ from agentcomm.llm.chat_history import ChatHistory, ChatMessage
 logger = logging.getLogger(__name__)
 
 
+# Global event loop for async operations
+_async_loop = None
+_async_loop_thread = None
+
+def _get_or_create_event_loop():
+    """Get or create a persistent event loop for async operations"""
+    global _async_loop, _async_loop_thread
+
+    if _async_loop is None or _async_loop.is_closed():
+        def run_event_loop():
+            global _async_loop
+            _async_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(_async_loop)
+            _async_loop.run_forever()
+
+        _async_loop_thread = threading.Thread(target=run_event_loop, daemon=True)
+        _async_loop_thread.start()
+
+        # Wait for the loop to be created
+        import time
+        while _async_loop is None:
+            time.sleep(0.01)
+
+    return _async_loop
+
 def run_async_in_thread(coro_func, *args, on_complete=None, **kwargs):
     """
     Run an async function in a separate thread
-    
+
     Args:
         coro_func: Async function to run
         *args: Arguments to pass to the function
         on_complete: Callback to call when the function completes
         **kwargs: Keyword arguments to pass to the function
     """
-    def thread_target():
+    loop = _get_or_create_event_loop()
+
+    async def wrapper():
         try:
-            # Create a new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # Run the coroutine in the event loop
-            loop.run_until_complete(coro_func(*args, **kwargs))
-            loop.close()
-            
-            # Call the completion callback if provided
+            await coro_func(*args, **kwargs)
             if on_complete:
                 on_complete()
         except Exception as e:
-            logger.error(f"Error in async thread: {e}")
-    
-    # Start the thread
-    thread = threading.Thread(target=thread_target)
-    thread.daemon = True
-    thread.start()
-    return thread
+            logger.error(f"Error in async task: {e}", exc_info=True)
+
+    # Schedule the coroutine on the persistent event loop
+    asyncio.run_coroutine_threadsafe(wrapper(), loop)
 
 class MessageWidget(QFrame):
     """
@@ -480,6 +496,12 @@ class ChatWidget(QWidget):
         """
         # Only handle chunks from the current entity
         if self.current_entity_id == sender_id:
+            # Check for CLEAR signal to reset the streaming response
+            if chunk == "<<<CLEAR>>>":
+                logger.info("Received CLEAR signal - resetting streaming response")
+                self.streaming_response = ""
+                return
+
             # Append the chunk to the streaming response
             self.streaming_response += chunk
             logger.debug(f"Streaming chunk received. Total length now: {len(self.streaming_response)}")
@@ -501,30 +523,45 @@ class ChatWidget(QWidget):
         """
         if not self.streaming_response:
             return
-        
+
         # Check if there's already a streaming message widget
         streaming_widget = None
+        streaming_count = 0
         for i in range(self.chat_layout.count()):
             widget = self.chat_layout.itemAt(i).widget()
             if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
-                streaming_widget = widget
-                break
-        
+                streaming_count += 1
+                if not streaming_widget:
+                    streaming_widget = widget
+
+        # Debug: log if multiple streaming widgets found
+        if streaming_count > 1:
+            logger.warning(f"Found {streaming_count} streaming widgets! Removing duplicates...")
+            # Remove duplicate streaming widgets
+            for i in range(self.chat_layout.count() - 1, -1, -1):
+                widget = self.chat_layout.itemAt(i).widget()
+                if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
+                    if widget != streaming_widget:
+                        logger.warning(f"Removing duplicate streaming widget at position {i}")
+                        self.chat_layout.removeWidget(widget)
+                        widget.deleteLater()
+
         if streaming_widget:
             # Update the existing widget
             message_text = streaming_widget.findChild(QTextEdit)
             if message_text:
                 message_text.setPlainText(self.streaming_response)
-                
+
                 # Update the height
                 doc_height = message_text.document().size().height()
                 message_text.setFixedHeight(min(200, max(50, int(doc_height) + 20)))
         else:
             # Create a new widget
+            logger.debug(f"Creating new streaming widget for entity: {self.current_entity_id}")
             streaming_widget = MessageWidget(self.streaming_response, self.current_entity_id or "Assistant")
             streaming_widget.is_streaming = True
             self.chat_layout.addWidget(streaming_widget)
-        
+
         # Scroll to the bottom
         self.chat_scroll_area.verticalScrollBar().setValue(
             self.chat_scroll_area.verticalScrollBar().maximum()
