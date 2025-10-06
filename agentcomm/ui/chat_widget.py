@@ -216,11 +216,48 @@ class ChatWidget(QWidget):
         self.chat_scroll_area.setWidget(self.chat_container)
         self.layout.addWidget(self.chat_scroll_area, 1)
         
+        # Create a header area for the reset button
+        self.header_layout = QHBoxLayout()
+        self.header_layout.setContentsMargins(10, 5, 10, 5)
+        self.header_layout.setSpacing(10)
+
+        # Add a spacer to push the reset button to the right
+        self.header_layout.addStretch()
+
+        # Create the reset button
+        self.reset_button = QPushButton("Clear Chat")
+        self.reset_button.setFixedWidth(120)
+        self.reset_button.setFixedHeight(35)
+        self.reset_button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #f093fb, stop:1 #f5576c);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #f5576c, stop:1 #f093fb);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #d94960, stop:1 #da7bd9);
+            }
+        """)
+        self.reset_button.clicked.connect(self.reset_thread)
+        self.header_layout.addWidget(self.reset_button)
+
+        self.layout.addLayout(self.header_layout)
+
         # Create the input area
         self.input_layout = QHBoxLayout()
         self.input_layout.setContentsMargins(10, 10, 10, 10)
         self.input_layout.setSpacing(10)
-        
+
         self.message_input = QTextEdit()
         self.message_input.setPlaceholderText("Type your message here...")
         self.message_input.setAcceptRichText(False)
@@ -517,6 +554,30 @@ class ChatWidget(QWidget):
         # Add the error message to the chat display
         self.add_message_widget(f"Error: {error_message}", "System")
     
+    def reset_thread(self):
+        """
+        Reset the current thread by clearing all messages
+        """
+        # Confirm with the user before resetting
+        from PyQt6.QtWidgets import QMessageBox
+
+        reply = QMessageBox.question(
+            self,
+            "Clear Chat",
+            "Are you sure you want to clear this chat? All messages will be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Reset the chat history in the session manager
+            if self.session_manager.reset_current_thread():
+                # Clear the UI
+                self.clear_chat()
+                logger.info("Thread reset successfully")
+            else:
+                logger.warning("Failed to reset thread")
+
     def update_streaming_message(self):
         """
         Update the streaming message in the chat display

@@ -244,10 +244,31 @@ class SessionManager:
             self._notify_error(f"Error sending message: {e}")
             return False
             
+    def reset_current_thread(self) -> bool:
+        """
+        Reset the current thread by clearing all messages
+
+        Returns:
+            True if the thread was reset successfully, False otherwise
+        """
+        try:
+            history = self.get_current_chat_history()
+            if history:
+                history.clear()
+                logger.info("Thread reset successfully")
+                return True
+            else:
+                logger.warning("No active thread to reset")
+                return False
+        except Exception as e:
+            logger.error(f"Error resetting thread: {e}")
+            self._notify_error(f"Error resetting thread: {e}")
+            return False
+
     def _notify_error(self, error_message: str) -> None:
         """
         Notify error callbacks about an error
-        
+
         Args:
             error_message: Error message to send
         """
