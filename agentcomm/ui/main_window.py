@@ -21,6 +21,7 @@ from agentcomm.llm.llm_router import LLMRouter
 from agentcomm.ui.chat_widget import ChatWidget
 from agentcomm.ui.agent_selector import AgentSelector
 from agentcomm.ui.settings_dialog import SettingsDialog
+from agentcomm.ui.walkthrough import WalkthroughManager
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,22 @@ class MainWindow(QMainWindow):
         
         # Connect signals and slots
         self.connect_signals()
+
+        # Set object names for walkthrough
+        self._set_object_names()
+
+        # Initialize walkthrough
+        self.walkthrough_manager = WalkthroughManager(self)
+
+        # Show walkthrough for first-time users
+        is_first_time = WalkthroughManager.is_first_time_user()
+        print(f"Is first time user: {is_first_time}")
+        if is_first_time:
+            # Delay walkthrough to ensure UI is fully loaded
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(500, self.walkthrough_manager.start)
+        else:
+            print("Not first time - walkthrough will not auto-start")
         
     def create_menu_bar(self):
         """
@@ -157,10 +174,11 @@ class MainWindow(QMainWindow):
         file_menu = menu_bar.addMenu("&File")
         
         # Add actions to the File menu
-        settings_action = QAction("&Settings", self)
-        settings_action.setStatusTip("Open settings dialog")
-        settings_action.triggered.connect(self.open_settings)
-        file_menu.addAction(settings_action)
+        self.settings_action = QAction("&Settings", self)
+        self.settings_action.setObjectName("settings_action")
+        self.settings_action.setStatusTip("Open settings dialog")
+        self.settings_action.triggered.connect(self.open_settings)
+        file_menu.addAction(self.settings_action)
         
         file_menu.addSeparator()
         
@@ -171,8 +189,15 @@ class MainWindow(QMainWindow):
         
         # Create the Help menu
         help_menu = menu_bar.addMenu("&Help")
-        
+
         # Add actions to the Help menu
+        walkthrough_action = QAction("Show &Walkthrough", self)
+        walkthrough_action.setStatusTip("Show the application walkthrough")
+        walkthrough_action.triggered.connect(self.show_walkthrough)
+        help_menu.addAction(walkthrough_action)
+
+        help_menu.addSeparator()
+
         about_action = QAction("&About", self)
         about_action.setStatusTip("Show the application's About box")
         about_action.triggered.connect(self.show_about)
@@ -249,7 +274,7 @@ class MainWindow(QMainWindow):
         Show the about dialog
         """
         from PyQt6.QtWidgets import QMessageBox
-        
+
         QMessageBox.about(
             self,
             "About A2A Client",
@@ -258,6 +283,41 @@ class MainWindow(QMainWindow):
             "(Agent-to-Agent) protocol-compliant agents while also providing "
             "direct access to various Large Language Models (LLMs)."
         )
+
+    def show_walkthrough(self):
+        """
+        Show the application walkthrough
+        """
+        if hasattr(self, 'walkthrough_manager'):
+            self.walkthrough_manager.start()
+
+    def _set_object_names(self):
+        """
+        Set object names for widgets to be used in walkthrough
+        """
+        # Agent selector widgets
+        if hasattr(self.agent_selector, 'agents_list'):
+            self.agent_selector.agents_list.setObjectName("agent_list")
+        if hasattr(self.agent_selector, 'refresh_agents_button'):
+            self.agent_selector.refresh_agents_button.setObjectName("refresh_agents_button")
+
+        # Chat widget components
+        if hasattr(self.chat_widget, 'thread_selector'):
+            self.chat_widget.thread_selector.setObjectName("thread_selector")
+        if hasattr(self.chat_widget, 'new_thread_btn'):
+            self.chat_widget.new_thread_btn.setObjectName("new_thread_button")
+        if hasattr(self.chat_widget, 'rename_thread_btn'):
+            self.chat_widget.rename_thread_btn.setObjectName("rename_thread_button")
+        if hasattr(self.chat_widget, 'delete_thread_btn'):
+            self.chat_widget.delete_thread_btn.setObjectName("delete_thread_button")
+        if hasattr(self.chat_widget, 'clear_chat_btn'):
+            self.chat_widget.clear_chat_btn.setObjectName("clear_chat_button")
+        if hasattr(self.chat_widget, 'chat_scroll_area'):
+            self.chat_widget.chat_scroll_area.setObjectName("chat_display")
+        if hasattr(self.chat_widget, 'message_input'):
+            self.chat_widget.message_input.setObjectName("message_input")
+        if hasattr(self.chat_widget, 'send_button'):
+            self.chat_widget.send_button.setObjectName("send_button")
     
     def closeEvent(self, event):
         """
