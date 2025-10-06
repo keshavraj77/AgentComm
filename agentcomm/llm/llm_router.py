@@ -18,13 +18,17 @@ class LLMRouter:
     Routes requests to the appropriate LLM provider
     """
     
-    def __init__(self):
+    def __init__(self, config_store=None):
         """
         Initialize the LLM router
+
+        Args:
+            config_store: Optional config store for reloading configuration
         """
         self.providers: Dict[str, LLMProvider] = {}
         self.default_provider: Optional[str] = None
         self.last_responses: Dict[str, str] = {}  # Store last responses by provider
+        self.config_store = config_store
     
     def register_provider(self, name: str, provider: LLMProvider, is_default: bool = False):
         """
@@ -238,6 +242,79 @@ class LLMRouter:
         
         return provider.available_models
     
+    def reload_config(self):
+        """
+        Reload configuration from the config store
+        """
+        if self.config_store is None:
+            logger.warning("No config store available for reloading configuration")
+            return False
+
+        try:
+            # Get the updated LLM configuration
+            llm_config = self.config_store.get_llm_config()
+            if not llm_config:
+                logger.warning("No LLM configuration found")
+                return False
+
+            # Clear existing providers
+            self.providers.clear()
+
+            # Recreate providers from the updated config
+            default_provider = llm_config.get("default_provider")
+            providers_config = llm_config.get("providers", {})
+
+            for name, provider_config in providers_config.items():
+                try:
+                    if name == "OpenAI":
+                        provider = OpenAIProvider(
+                            api_key=provider_config.get("api_key"),
+                            default_model=provider_config.get("default_model", "gpt-3.5-turbo"),
+                            temperature=provider_config.get("temperature", 0.7),
+                            max_tokens=provider_config.get("max_tokens", 1000)
+                        )
+                        self.register_provider(name, provider, is_default=(name == default_provider))
+
+                    elif name == "Google Gemini":
+                        provider = GeminiProvider(
+                            api_key=provider_config.get("api_key"),
+                            default_model=provider_config.get("default_model", "gemini-1.5-pro"),
+                            temperature=provider_config.get("temperature", 0.7),
+                            max_tokens=provider_config.get("max_tokens", 1000)
+                        )
+                        self.register_provider(name, provider, is_default=(name == default_provider))
+
+                    elif name == "Anthropic Claude":
+                        provider = AnthropicProvider(
+                            api_key=provider_config.get("api_key"),
+                            default_model=provider_config.get("default_model", "claude-3-sonnet-20240229"),
+                            temperature=provider_config.get("temperature", 0.7),
+                            max_tokens=provider_config.get("max_tokens", 1000)
+                        )
+                        self.register_provider(name, provider, is_default=(name == default_provider))
+
+                    elif name == "Local LLM":
+                        provider = LocalLLMProvider(
+                            host=provider_config.get("host", "http://localhost:11434"),
+                            default_model=provider_config.get("default_model", "llama3"),
+                            temperature=provider_config.get("temperature", 0.7),
+                            max_tokens=provider_config.get("max_tokens", 1000)
+                        )
+                        self.register_provider(name, provider, is_default=(name == default_provider))
+
+                    else:
+                        logger.warning(f"Unknown provider type: {name}")
+
+                except Exception as e:
+                    logger.error(f"Error reinitializing provider {name}: {e}")
+
+            logger.info("LLM configuration reloaded successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error reloading LLM configuration: {e}")
+            return False
+
     async def close(self):
         """
         Close all providers

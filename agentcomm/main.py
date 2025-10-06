@@ -44,13 +44,14 @@ def main():
         # Initialize agent registry
         agent_registry = AgentRegistry(config_store)
         
-        # Initialize LLM router
-        llm_router = LLMRouter()
-        
+        # Initialize LLM router with config_store
+        llm_router = LLMRouter(config_store=config_store)
+
         # Load LLM configuration
         llm_config = config_store.get_llm_config()
         if llm_config:
             llm_router = LLMRouter.create_from_config(llm_config)
+            llm_router.config_store = config_store  # Set config_store for reloading
 
         # Get system prompt from config
         system_prompt = llm_config.get("system_prompt") if llm_config else None

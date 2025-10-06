@@ -726,7 +726,7 @@ class SettingsDialog(QDialog):
     def save_llm(self, llm_id: str, config: Dict[str, Any]):
         """
         Save an LLM configuration
-        
+
         Args:
             llm_id: LLM ID
             config: LLM configuration
@@ -734,24 +734,25 @@ class SettingsDialog(QDialog):
         try:
             # Get the current LLM configuration from the agent registry's config store
             config_store = self.agent_registry.config_store
-            llm_config = config_store.get_llm_config()
-            
-            # Update the configuration
-            if "providers" not in llm_config:
-                llm_config["providers"] = {}
-            
-            if llm_id not in llm_config["providers"]:
-                llm_config["providers"][llm_id] = {}
-            
+
+            # Update the configuration in the config store
+            if "providers" not in config_store.llm_config:
+                config_store.llm_config["providers"] = {}
+
+            if llm_id not in config_store.llm_config["providers"]:
+                config_store.llm_config["providers"][llm_id] = {}
+
             for key, value in config.items():
-                llm_config["providers"][llm_id][key] = value
-            
+                config_store.llm_config["providers"][llm_id][key] = value
+
             # Save the configuration
             if config_store.save_config("llm"):
+                # Reload LLM router with new config
+                self.llm_router.reload_config()
                 QMessageBox.information(self, "Success", f"LLM {llm_id} configuration saved successfully")
             else:
                 QMessageBox.warning(self, "Error", f"Failed to save LLM {llm_id} configuration")
-        
+
         except Exception as e:
             logger.error(f"Error saving LLM configuration: {e}")
             QMessageBox.critical(self, "Error", f"Error saving LLM configuration: {e}")
