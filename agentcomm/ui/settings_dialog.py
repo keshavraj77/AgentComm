@@ -291,10 +291,12 @@ class SettingsDialog(QDialog):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
+
         # Create a widget to hold the agent forms
         self.agents_container = QWidget()
+        self.agents_container.setStyleSheet("background: transparent;")
         self.agents_layout = QVBoxLayout(self.agents_container)
+        self.agents_layout.setContentsMargins(0, 0, 0, 0)
         scroll_area.setWidget(self.agents_container)
         
         agents_layout.addWidget(scroll_area)
@@ -324,10 +326,12 @@ class SettingsDialog(QDialog):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
+
         # Create a widget to hold the LLM forms
         self.llms_container = QWidget()
+        self.llms_container.setStyleSheet("background: transparent;")
         self.llms_layout = QVBoxLayout(self.llms_container)
+        self.llms_layout.setContentsMargins(0, 0, 0, 0)
         scroll_area.setWidget(self.llms_container)
         
         llms_layout.addWidget(scroll_area)
@@ -392,6 +396,11 @@ class SettingsDialog(QDialog):
         # Add the LLMs
         for llm_id, provider in self.llm_router.get_all_providers().items():
             self.add_llm_form(llm_id, provider)
+
+        # Add spacer to push content to top
+        from PyQt6.QtWidgets import QSpacerItem, QSizePolicy
+        spacer = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        self.llms_layout.addItem(spacer)
     
     def add_agent_form(self, agent: Optional[Agent] = None):
         """
