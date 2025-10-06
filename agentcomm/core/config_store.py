@@ -26,13 +26,15 @@ class ConfigStore:
             self.config_dir = Path(__file__).parent.parent / "config"
         else:
             self.config_dir = Path(config_dir)
-        
+
         self.agents_file = self.config_dir / "agents.json"
         self.llm_config_file = self.config_dir / "llm_config.json"
-        
+        self.threads_file = self.config_dir / "threads.json"
+
         # Load configurations
         self.agents_config = self._load_config(self.agents_file)
         self.llm_config = self._load_config(self.llm_config_file)
+        self.threads_config = self._load_config(self.threads_file)
         
         logger.info(f"Configuration loaded from {self.config_dir}")
     
@@ -60,10 +62,10 @@ class ConfigStore:
     def save_config(self, config_type: str) -> bool:
         """
         Save configuration to a JSON file
-        
+
         Args:
-            config_type: Type of configuration to save ('agents' or 'llm')
-            
+            config_type: Type of configuration to save ('agents', 'llm', or 'threads')
+
         Returns:
             True if successful, False otherwise
         """
@@ -74,10 +76,13 @@ class ConfigStore:
             elif config_type == 'llm':
                 with open(self.llm_config_file, 'w') as f:
                     json.dump(self.llm_config, f, indent=2)
+            elif config_type == 'threads':
+                with open(self.threads_file, 'w') as f:
+                    json.dump(self.threads_config, f, indent=2)
             else:
                 logger.error(f"Unknown configuration type: {config_type}")
                 return False
-            
+
             logger.info(f"Configuration saved: {config_type}")
             return True
         except Exception as e:
@@ -122,11 +127,11 @@ class ConfigStore:
     def set_api_key(self, provider_name: str, api_key: str) -> bool:
         """
         Set API key for a provider
-        
+
         Args:
             provider_name: Name of the provider
             api_key: API key to set
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -140,6 +145,32 @@ class ConfigStore:
                 return False
         except Exception as e:
             logger.error(f"Error setting API key for {provider_name}: {e}")
+            return False
+
+    def get_threads(self) -> Dict[str, Any]:
+        """
+        Get thread configuration
+
+        Returns:
+            Dict containing thread configuration
+        """
+        return self.threads_config
+
+    def save_threads(self, threads_data: Dict[str, Any]) -> bool:
+        """
+        Save thread configuration
+
+        Args:
+            threads_data: Thread data to save
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.threads_config = threads_data
+            return self.save_config('threads')
+        except Exception as e:
+            logger.error(f"Error saving threads: {e}")
             return False
 
 

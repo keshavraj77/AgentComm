@@ -57,15 +57,38 @@ def main():
 
         # Initialize session manager
         session_manager = SessionManager(agent_registry, llm_router, system_prompt=system_prompt)
-        
+
+        # Load saved threads
+        threads_data = config_store.get_threads()
+        if threads_data:
+            session_manager.load_threads(threads_data)
+            logger.info("Loaded saved threads from config")
+
+        # Register auto-save callback
+        def auto_save():
+            threads_data = session_manager.save_threads()
+            config_store.save_threads(threads_data)
+            logger.debug("Threads auto-saved")
+
+        session_manager.register_auto_save_callback(auto_save)
+
         # Start the UI
         app = QApplication(sys.argv)
         app.setApplicationName("A2A Client")
-        
+
         # Create and show the main window
         main_window = MainWindow(session_manager, agent_registry, llm_router)
         main_window.show()
-        
+
+        # Register cleanup function to save threads on exit
+        def save_on_exit():
+            logger.info("Saving threads before exit...")
+            threads_data = session_manager.save_threads()
+            config_store.save_threads(threads_data)
+            logger.info("Threads saved successfully")
+
+        app.aboutToQuit.connect(save_on_exit)
+
         # Start the application event loop
         sys.exit(app.exec())
         

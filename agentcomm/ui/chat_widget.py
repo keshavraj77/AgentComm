@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, List
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit,
-    QPushButton, QScrollArea, QLabel, QSplitter, QFrame
+    QPushButton, QScrollArea, QLabel, QSplitter, QFrame, QComboBox, QInputDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QMetaObject, Q_ARG
 from PyQt6.QtGui import QTextCursor, QFont, QColor, QTextCharFormat
@@ -170,17 +170,154 @@ class ChatWidget(QWidget):
         self.current_entity_id: Optional[str] = None
         self.current_entity_type: Optional[str] = None
         self.streaming_response: str = ""
-        
+
         # Register callbacks with thread-safe wrappers
         self.session_manager.register_message_callback(self._thread_safe_message_callback)
         self.session_manager.register_streaming_callback(self._thread_safe_streaming_callback)
         self.session_manager.register_error_callback(self._thread_safe_error_callback)
+        self.session_manager.register_thread_callback(self._thread_safe_thread_callback)
         
         # Create the layout
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
-        
+
+        # Create thread selector header
+        self.thread_header = QHBoxLayout()
+        self.thread_header.setContentsMargins(10, 5, 10, 5)
+        self.thread_header.setSpacing(10)
+
+        # Thread selector label
+        thread_label = QLabel("Thread:")
+        thread_label.setStyleSheet("""
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: bold;
+        """)
+        self.thread_header.addWidget(thread_label)
+
+        # Thread dropdown
+        self.thread_selector = QComboBox()
+        self.thread_selector.setFixedWidth(200)
+        self.thread_selector.setStyleSheet("""
+            QComboBox {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #2d3748, stop:1 #1a202c);
+                color: #ffffff;
+                border: 2px solid #4a5568;
+                border-radius: 8px;
+                padding: 5px 10px;
+                font-size: 13px;
+            }
+            QComboBox:hover {
+                border: 2px solid #667eea;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                background: #2d3748;
+                color: #ffffff;
+                selection-background-color: #667eea;
+                border: 2px solid #4a5568;
+                border-radius: 5px;
+            }
+        """)
+        self.thread_selector.currentIndexChanged.connect(self.on_thread_changed)
+        self.thread_header.addWidget(self.thread_selector)
+
+        # New thread button
+        self.new_thread_btn = QPushButton("New")
+        self.new_thread_btn.setFixedWidth(60)
+        self.new_thread_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+        """)
+        self.new_thread_btn.clicked.connect(self.create_new_thread)
+        self.thread_header.addWidget(self.new_thread_btn)
+
+        # Rename thread button
+        self.rename_thread_btn = QPushButton("Rename")
+        self.rename_thread_btn.setFixedWidth(70)
+        self.rename_thread_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+        """)
+        self.rename_thread_btn.clicked.connect(self.rename_current_thread)
+        self.thread_header.addWidget(self.rename_thread_btn)
+
+        # Delete thread button
+        self.delete_thread_btn = QPushButton("Delete")
+        self.delete_thread_btn.setFixedWidth(70)
+        self.delete_thread_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #f093fb, stop:1 #f5576c);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #f5576c, stop:1 #f093fb);
+            }
+        """)
+        self.delete_thread_btn.clicked.connect(self.delete_current_thread)
+        self.thread_header.addWidget(self.delete_thread_btn)
+
+        # Clear chat button
+        self.clear_chat_btn = QPushButton("Clear Chat")
+        self.clear_chat_btn.setFixedWidth(90)
+        self.clear_chat_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #f093fb, stop:1 #f5576c);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #f5576c, stop:1 #f093fb);
+            }
+        """)
+        self.clear_chat_btn.clicked.connect(self.reset_thread)
+        self.thread_header.addWidget(self.clear_chat_btn)
+
+        self.thread_header.addStretch()
+
+        self.layout.addLayout(self.thread_header)
+
         # Create the chat display area
         self.chat_scroll_area = QScrollArea()
         self.chat_scroll_area.setWidgetResizable(True)
@@ -206,52 +343,15 @@ class ChatWidget(QWidget):
                 background: #764ba2;
             }
         """)
-        
+
         self.chat_container = QWidget()
         self.chat_layout = QVBoxLayout(self.chat_container)
         self.chat_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.chat_layout.setSpacing(8)
         self.chat_layout.setContentsMargins(5, 5, 5, 5)
-        
+
         self.chat_scroll_area.setWidget(self.chat_container)
         self.layout.addWidget(self.chat_scroll_area, 1)
-        
-        # Create a header area for the reset button
-        self.header_layout = QHBoxLayout()
-        self.header_layout.setContentsMargins(10, 5, 10, 5)
-        self.header_layout.setSpacing(10)
-
-        # Add a spacer to push the reset button to the right
-        self.header_layout.addStretch()
-
-        # Create the reset button
-        self.reset_button = QPushButton("Clear Chat")
-        self.reset_button.setFixedWidth(120)
-        self.reset_button.setFixedHeight(35)
-        self.reset_button.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f093fb, stop:1 #f5576c);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                font-size: 13px;
-                font-weight: bold;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f5576c, stop:1 #f093fb);
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #d94960, stop:1 #da7bd9);
-            }
-        """)
-        self.reset_button.clicked.connect(self.reset_thread)
-        self.header_layout.addWidget(self.reset_button)
-
-        self.layout.addLayout(self.header_layout)
 
         # Create the input area
         self.input_layout = QHBoxLayout()
@@ -303,7 +403,7 @@ class ChatWidget(QWidget):
         """)
         self.send_button.clicked.connect(self.send_message)
         self.input_layout.addWidget(self.send_button)
-        
+
         self.layout.addLayout(self.input_layout)
         
         # Create a timer for updating the UI
@@ -338,21 +438,31 @@ class ChatWidget(QWidget):
             Q_ARG(str, error_message)
         )
 
+    def _thread_safe_thread_callback(self):
+        """Thread-safe wrapper for thread change callback"""
+        QMetaObject.invokeMethod(
+            self, "refresh_thread_list",
+            Qt.ConnectionType.QueuedConnection
+        )
+
     def set_current_entity(self, entity_id: str, entity_type: str):
         """
         Set the current entity (agent or LLM)
-        
+
         Args:
             entity_id: ID of the entity
             entity_type: Type of the entity (agent or llm)
         """
         self.current_entity_id = entity_id
         self.current_entity_type = entity_type
-        
+
+        # Refresh thread list for the new entity
+        self.refresh_thread_list()
+
         # Clear the chat display
         self.clear_chat()
-        
-        # Load the chat history
+
+        # Load the chat history for the current thread
         self.load_chat_history()
     
     def clear_chat(self):
@@ -627,5 +737,133 @@ class ChatWidget(QWidget):
         self.chat_scroll_area.verticalScrollBar().setValue(
             self.chat_scroll_area.verticalScrollBar().maximum()
         )
+
+    @pyqtSlot()
+    def refresh_thread_list(self):
+        """
+        Refresh the thread dropdown list
+        """
+        # Block signals to avoid triggering on_thread_changed
+        self.thread_selector.blockSignals(True)
+
+        # Save current selection
+        current_thread = self.session_manager.get_current_thread()
+        current_thread_id = current_thread.thread_id if current_thread else None
+
+        # Clear and repopulate the dropdown
+        self.thread_selector.clear()
+
+        # Get threads for the current entity
+        threads = self.session_manager.get_threads_for_entity()
+
+        # Add threads to dropdown
+        for thread in threads:
+            self.thread_selector.addItem(thread.title, thread.thread_id)
+
+        # Restore selection
+        if current_thread_id:
+            index = self.thread_selector.findData(current_thread_id)
+            if index >= 0:
+                self.thread_selector.setCurrentIndex(index)
+
+        # Re-enable signals
+        self.thread_selector.blockSignals(False)
+
+        # Update button states
+        has_threads = len(threads) > 0
+        self.rename_thread_btn.setEnabled(has_threads)
+        self.delete_thread_btn.setEnabled(has_threads and len(threads) > 1)
+        self.clear_chat_btn.setEnabled(has_threads)
+
+    def on_thread_changed(self, index: int):
+        """
+        Handle thread selection change
+
+        Args:
+            index: Index of the selected thread
+        """
+        if index < 0:
+            return
+
+        thread_id = self.thread_selector.itemData(index)
+        if thread_id and self.session_manager.switch_thread(thread_id):
+            # Clear and reload chat
+            self.clear_chat()
+            self.load_chat_history()
+
+    def create_new_thread(self):
+        """
+        Create a new thread for the current entity
+        """
+        if not self.current_entity_id:
+            logger.warning("No entity selected")
+            return
+
+        thread_id = self.session_manager.create_thread(self.current_entity_id, self.current_entity_type)
+        if thread_id:
+            # Switch to the new thread
+            if self.session_manager.switch_thread(thread_id):
+                # Refresh the thread list and load history
+                self.refresh_thread_list()
+                self.clear_chat()
+                self.load_chat_history()
+
+    def rename_current_thread(self):
+        """
+        Rename the current thread
+        """
+        current_thread = self.session_manager.get_current_thread()
+        if not current_thread:
+            logger.warning("No thread selected")
+            return
+
+        # Prompt for new name
+        new_title, ok = QInputDialog.getText(
+            self,
+            "Rename Thread",
+            "Enter new thread name:",
+            text=current_thread.title
+        )
+
+        if ok and new_title.strip():
+            if self.session_manager.rename_thread(current_thread.thread_id, new_title.strip()):
+                self.refresh_thread_list()
+
+    def delete_current_thread(self):
+        """
+        Delete the current thread
+        """
+        current_thread = self.session_manager.get_current_thread()
+        if not current_thread:
+            logger.warning("No thread selected")
+            return
+
+        # Get thread count
+        threads = self.session_manager.get_threads_for_entity()
+        if len(threads) <= 1:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "Cannot Delete",
+                "Cannot delete the last thread. At least one thread must exist."
+            )
+            return
+
+        # Confirm deletion
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Delete Thread",
+            f"Are you sure you want to delete thread '{current_thread.title}'? This action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.session_manager.delete_thread(current_thread.thread_id):
+                # Thread list will be refreshed by callback
+                # Load the new current thread
+                self.clear_chat()
+                self.load_chat_history()
 
 
