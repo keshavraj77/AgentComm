@@ -50,6 +50,6 @@ data/
 
 # API Keys and sensitive configs
 config/api_keys.json
-agentcomm/config/llm_config.json
+# Note: llm_config.json and agents.json are tracked but should not contain API keys
+# Users add API keys through the UI, and local changes won't be committed
 agentcomm/config/threads.json
-agentcomm/config/agents.json
