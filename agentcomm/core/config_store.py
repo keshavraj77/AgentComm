@@ -18,7 +18,7 @@ class ConfigStore:
     def __init__(self, config_dir: Optional[str] = None):
         """
         Initialize the configuration store
-        
+
         Args:
             config_dir: Optional path to the configuration directory
         """
@@ -27,17 +27,44 @@ class ConfigStore:
         else:
             self.config_dir = Path(config_dir)
 
+        # Ensure config directory exists
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+
         self.agents_file = self.config_dir / "agents.json"
         self.llm_config_file = self.config_dir / "llm_config.json"
         self.threads_file = self.config_dir / "threads.json"
+
+        # Initialize config files from examples if they don't exist
+        self._initialize_config_files()
 
         # Load configurations
         self.agents_config = self._load_config(self.agents_file)
         self.llm_config = self._load_config(self.llm_config_file)
         self.threads_config = self._load_config(self.threads_file)
-        
+
         logger.info(f"Configuration loaded from {self.config_dir}")
-    
+
+    def _initialize_config_files(self) -> None:
+        """
+        Initialize config files from examples if they don't exist
+        """
+        import shutil
+
+        # Map of config files to their example templates
+        config_files = {
+            'agents.json': 'agents.example.json',
+            'llm_config.json': 'llm_config.example.json'
+        }
+
+        for config_name, example_name in config_files.items():
+            config_path = self.config_dir / config_name
+            example_path = self.config_dir / example_name
+
+            if not config_path.exists() and example_path.exists():
+                logger.info(f"Creating {config_name} from example template")
+                shutil.copy(example_path, config_path)
+                logger.warning(f"Please configure {config_name} with your API keys and settings")
+
     def _load_config(self, config_file: Path) -> Dict[str, Any]:
         """
         Load configuration from a JSON file

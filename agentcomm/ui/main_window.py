@@ -179,9 +179,17 @@ class MainWindow(QMainWindow):
         self.settings_action.setStatusTip("Open settings dialog")
         self.settings_action.triggered.connect(self.open_settings)
         file_menu.addAction(self.settings_action)
-        
+
         file_menu.addSeparator()
-        
+
+        # Add copyright/developer credit
+        credit_action = QAction("Built by Keshav", self)
+        credit_action.setEnabled(False)  # Make it non-clickable (display only)
+        credit_action.setStatusTip("Developer: Keshav")
+        file_menu.addAction(credit_action)
+
+        file_menu.addSeparator()
+
         exit_action = QAction("E&xit", self)
         exit_action.setStatusTip("Exit the application")
         exit_action.triggered.connect(self.close)

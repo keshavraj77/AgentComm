@@ -405,7 +405,21 @@ class ChatWidget(QWidget):
         self.input_layout.addWidget(self.send_button)
 
         self.layout.addLayout(self.input_layout)
-        
+
+        # Add developer credit
+        credit_label = QLabel("Built by Keshav")
+        credit_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit_label.setStyleSheet("""
+            QLabel {
+                color: rgba(255, 255, 255, 0.5);
+                font-size: 11px;
+                font-style: italic;
+                padding: 5px;
+                background: transparent;
+            }
+        """)
+        self.layout.addWidget(credit_label)
+
         # Create a timer for updating the UI
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.update_streaming_message)
