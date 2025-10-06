@@ -347,9 +347,11 @@ class SettingsDialog(QDialog):
         """
         # Create the layout
         layout = QVBoxLayout(self.general_tab)
-        
+
         # Create the general settings form
         form_layout = QFormLayout()
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         
         # Add the settings
         self.webhook_port_input = QSpinBox()
@@ -412,6 +414,8 @@ class SettingsDialog(QDialog):
         # Create the group box
         group_box = QGroupBox(agent.name if agent else "New Agent")
         form_layout = QFormLayout(group_box)
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         
         # Add the form fields
         id_input = QLineEdit(agent.id if agent else "")
@@ -503,7 +507,9 @@ class SettingsDialog(QDialog):
         # Create the group box
         group_box = QGroupBox(llm_id)
         form_layout = QFormLayout(group_box)
-        
+        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
         # Add the form fields based on the provider type
         if llm_id == "OpenAI":
             api_key_input = QLineEdit(provider.api_key if hasattr(provider, "api_key") else "")
