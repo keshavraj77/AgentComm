@@ -42,7 +42,10 @@ class SettingsDialog(QDialog):
         
         self.agent_registry = agent_registry
         self.llm_router = llm_router
-        
+
+        # Store references to LLM input fields for batch saving
+        self.llm_inputs = {}
+
         self.setWindowTitle("Settings")
         self.setMinimumSize(800, 600)
 
@@ -377,13 +380,15 @@ class SettingsDialog(QDialog):
         """
         Load the LLMs into the form
         """
-        # Clear the layout
+        # Clear the layout and input references
         while self.llms_layout.count():
             item = self.llms_layout.takeAt(0)
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-        
+
+        self.llm_inputs.clear()
+
         # Add the LLMs
         for llm_id, provider in self.llm_router.get_all_providers().items():
             self.add_llm_form(llm_id, provider)
@@ -495,17 +500,24 @@ class SettingsDialog(QDialog):
             api_key_input = QLineEdit(provider.api_key if hasattr(provider, "api_key") else "")
             api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
             form_layout.addRow("API Key:", api_key_input)
-            
+
             model_input = QLineEdit(provider.default_model if hasattr(provider, "default_model") else "")
             form_layout.addRow("Default Model:", model_input)
-            
+
             temperature_input = QDoubleSpinBox()
             temperature_input.setMinimum(0.0)
             temperature_input.setMaximum(2.0)
             temperature_input.setSingleStep(0.1)
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
-            
+
+            # Store references for batch saving
+            self.llm_inputs[llm_id] = {
+                "api_key": api_key_input,
+                "default_model": model_input,
+                "temperature": temperature_input
+            }
+
             # Add the save button
             save_button = QPushButton("Save")
             save_button.clicked.connect(lambda: self.save_llm(
@@ -522,17 +534,24 @@ class SettingsDialog(QDialog):
             api_key_input = QLineEdit(provider.api_key if hasattr(provider, "api_key") else "")
             api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
             form_layout.addRow("API Key:", api_key_input)
-            
+
             model_input = QLineEdit(provider.default_model if hasattr(provider, "default_model") else "")
             form_layout.addRow("Default Model:", model_input)
-            
+
             temperature_input = QDoubleSpinBox()
             temperature_input.setMinimum(0.0)
             temperature_input.setMaximum(2.0)
             temperature_input.setSingleStep(0.1)
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
-            
+
+            # Store references for batch saving
+            self.llm_inputs[llm_id] = {
+                "api_key": api_key_input,
+                "default_model": model_input,
+                "temperature": temperature_input
+            }
+
             # Add the save button
             save_button = QPushButton("Save")
             save_button.clicked.connect(lambda: self.save_llm(
@@ -549,17 +568,24 @@ class SettingsDialog(QDialog):
             api_key_input = QLineEdit(provider.api_key if hasattr(provider, "api_key") else "")
             api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
             form_layout.addRow("API Key:", api_key_input)
-            
+
             model_input = QLineEdit(provider.default_model if hasattr(provider, "default_model") else "")
             form_layout.addRow("Default Model:", model_input)
-            
+
             temperature_input = QDoubleSpinBox()
             temperature_input.setMinimum(0.0)
             temperature_input.setMaximum(2.0)
             temperature_input.setSingleStep(0.1)
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
-            
+
+            # Store references for batch saving
+            self.llm_inputs[llm_id] = {
+                "api_key": api_key_input,
+                "default_model": model_input,
+                "temperature": temperature_input
+            }
+
             # Add the save button
             save_button = QPushButton("Save")
             save_button.clicked.connect(lambda: self.save_llm(
@@ -575,17 +601,24 @@ class SettingsDialog(QDialog):
         elif llm_id == "Local LLM":
             host_input = QLineEdit(provider.host if hasattr(provider, "host") else "http://localhost:11434")
             form_layout.addRow("Host:", host_input)
-            
+
             model_input = QLineEdit(provider.default_model if hasattr(provider, "default_model") else "")
             form_layout.addRow("Default Model:", model_input)
-            
+
             temperature_input = QDoubleSpinBox()
             temperature_input.setMinimum(0.0)
             temperature_input.setMaximum(2.0)
             temperature_input.setSingleStep(0.1)
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
-            
+
+            # Store references for batch saving
+            self.llm_inputs[llm_id] = {
+                "host": host_input,
+                "default_model": model_input,
+                "temperature": temperature_input
+            }
+
             # Add the save button
             save_button = QPushButton("Save")
             save_button.clicked.connect(lambda: self.save_llm(
@@ -761,14 +794,47 @@ class SettingsDialog(QDialog):
         """
         Apply the settings
         """
-        # Apply the general settings
-        # TODO: Implement this
-        
-        # Reload the agents and LLMs
-        self.agent_registry.load_agents()
-        
-        # Reload the UI
-        self.load_agents()
-        self.load_llms()
+        try:
+            # Save all LLM configurations
+            config_store = self.agent_registry.config_store
+
+            for llm_id, inputs in self.llm_inputs.items():
+                # Build config dict based on provider type
+                config = {}
+
+                if llm_id == "Local LLM":
+                    config = {
+                        "host": inputs["host"].text(),
+                        "default_model": inputs["default_model"].text(),
+                        "temperature": inputs["temperature"].value()
+                    }
+                else:
+                    config = {
+                        "api_key": inputs["api_key"].text(),
+                        "default_model": inputs["default_model"].text(),
+                        "temperature": inputs["temperature"].value()
+                    }
+
+                # Update config in config_store
+                if "providers" not in config_store.llm_config:
+                    config_store.llm_config["providers"] = {}
+
+                if llm_id not in config_store.llm_config["providers"]:
+                    config_store.llm_config["providers"][llm_id] = {}
+
+                for key, value in config.items():
+                    config_store.llm_config["providers"][llm_id][key] = value
+
+            # Save to file
+            if config_store.save_config("llm"):
+                # Reload LLM router with new config
+                self.llm_router.reload_config()
+                QMessageBox.information(self, "Success", "All settings applied successfully")
+            else:
+                QMessageBox.warning(self, "Error", "Failed to save settings")
+
+        except Exception as e:
+            logger.error(f"Error applying settings: {e}")
+            QMessageBox.critical(self, "Error", f"Error applying settings: {e}")
 
 

@@ -1,0 +1,35 @@
+{
+  "Google Gemini": {
+    "5621a322-691d-46b2-80fe-6212b6710726": {
+      "thread_id": "5621a322-691d-46b2-80fe-6212b6710726",
+      "entity_id": "Google Gemini",
+      "entity_type": "llm",
+      "title": "Thread 19:06:58",
+      "created_at": "2025-10-06T19:06:58.401715",
+      "chat_history": {
+        "messages": []
+      }
+    },
+    "6dca59e1-37f9-40b9-ab52-3db387acf500": {
+      "thread_id": "6dca59e1-37f9-40b9-ab52-3db387acf500",
+      "entity_id": "Google Gemini",
+      "entity_type": "llm",
+      "title": "Thread 19:16:41",
+      "created_at": "2025-10-06T19:16:41.600963",
+      "chat_history": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "hi",
+            "timestamp": "2025-10-06T19:16:43.844477"
+          },
+          {
+            "role": "assistant",
+            "content": "Hello! How can I help you today?\n",
+            "timestamp": "2025-10-06T19:16:45.832368"
+          }
+        ]
+      }
+    }
+  }
+}

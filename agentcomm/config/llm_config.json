@@ -12,7 +12,7 @@
       "presence_penalty": 0.0
     },
     "Google Gemini": {
-      "api_key": "",
+      "api_key": "AIzaSyArWoHRC2ZcM1vJAeurUtbQaM7Nd2Xa9Yc",
       "default_model": "gemini-2.0-flash",
       "temperature": 0.7,
       "max_tokens": 1000,
