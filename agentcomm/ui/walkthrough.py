@@ -294,90 +294,101 @@ class WalkthroughManager:
                 None  # No highlight for welcome
             ),
             WalkthroughStep(
-                "Agent Selection Panel",
-                "Here you can see all available agents (Interview Prep, Code Assistant, Currency Agent, etc.). "
-                "Click on any agent to start chatting with it. Each agent has specialized capabilities!",
-                "agent_list",  # Object name of agent list widget
+                "🤖 Agent Selection Panel",
+                "Here in the left sidebar you can see all available agents with the robot icon (🤖). "
+                "Click on any agent to start chatting with it. Active agents have an orange glow! "
+                "Each agent has specialized capabilities for different tasks.",
+                "agent_list",
                 (-10, -10, 10, 10)
             ),
             WalkthroughStep(
-                "Refresh Agents",
-                "Click this button to refresh the list of available agents. "
-                "This is useful when new agents are added to your configuration.",
+                "🧠 LLM Selection Panel",
+                "Below the agents, you'll find LLMs (Large Language Models) with the brain icon (🧠). "
+                "You can chat directly with OpenAI, Google Gemini, Anthropic Claude, or Local LLMs. "
+                "Active LLMs have a yellow glow!",
+                "llms_list",
+                (-10, -10, 10, 10)
+            ),
+            WalkthroughStep(
+                "↻ Refresh Button",
+                "Click this circular refresh button (↻) to reload the list of available agents. "
+                "It features a beautiful purple gradient and appears at the bottom of the Agents section.",
                 "refresh_agents_button",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
-                "Thread Management",
-                "Threads help you organize conversations. Click the thread dropdown to see all your threads. "
-                "Each thread maintains its own conversation history.",
+                "💬 Chat Threads",
+                "At the top of the chat area, you'll find the thread dropdown labeled 'Chats:'. "
+                "Threads help you organize multiple conversations. Each thread maintains its own history.",
                 "thread_selector",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
-                "Create New Thread",
-                "Click 'New' to create a new conversation thread. "
-                "This allows you to have multiple separate conversations with agents.",
+                "➕ New Thread",
+                "Click this plus button (➕) to create a new conversation thread. "
+                "This allows you to have multiple separate conversations with different agents or LLMs.",
                 "new_thread_button",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
-                "Rename Thread",
-                "Give your threads meaningful names by clicking 'Rename'. "
-                "This helps you organize and find conversations later.",
+                "✏️ Rename Thread",
+                "Click the pencil icon (✏️) to give your threads meaningful names. "
+                "This helps you organize and find specific conversations later.",
                 "rename_thread_button",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
-                "Delete Thread",
-                "Remove unwanted threads with the 'Delete' button. "
+                "🗑 Delete Thread",
+                "Click the trash icon (🗑) in the top-right to remove unwanted threads. "
                 "Be careful - this action cannot be undone!",
                 "delete_thread_button",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
-                "Clear Chat History",
-                "Clear the current thread's conversation history with this button. "
-                "This gives you a fresh start while keeping the thread.",
-                "clear_chat_button",
-                (-5, -5, 5, 5)
-            ),
-            WalkthroughStep(
-                "Chat Area",
+                "💬 Chat Display Area",
                 "This is where your conversations appear. "
-                "Your messages appear on the right (purple/blue gradient), "
-                "and agent responses appear on the left (pink gradient).",
+                "Your messages appear on the right with a gray background, "
+                "and AI responses appear on the left with the agent/LLM icon and name.",
                 "chat_display",
                 (-10, -10, 10, 10)
             ),
             WalkthroughStep(
-                "Message Input",
-                "Type your messages here. Press Enter or click 'Send' to send your message to the agent. "
-                "You can have natural conversations with AI agents!",
+                "⌨️ Message Input",
+                "Type your messages in this text box at the bottom. "
+                "You can have natural conversations with AI agents and LLMs!",
                 "message_input",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
-                "Send Button",
-                "Click this button to send your message to the selected agent. "
-                "You'll see the response appear in the chat area above.",
+                "↻ Clear Chat Button",
+                "The circular arrow button (↻) next to the input clears the current thread's history. "
+                "This gives you a fresh start while keeping the thread itself.",
+                "reset_button",
+                (-5, -5, 5, 5)
+            ),
+            WalkthroughStep(
+                "➤ Send Button",
+                "Click the blue arrow button (➤) to send your message. "
+                "Your message will be delivered to the selected agent or LLM, and you'll see the response appear in the chat area.",
                 "send_button",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
-                "Settings",
-                "Access settings from the menu bar to configure agents, LLM providers, "
-                "and general application preferences. You can add custom agents and manage API keys here.",
+                "⚙ Settings (Top Right)",
+                "Click the gear icon (⚙) in the top-right corner to access settings. "
+                "Here you can configure agents, manage LLM API keys, and customize the application. "
+                "Notice the subtle blue glow on the settings icon!",
                 "settings_action",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
                 "You're All Set! 🎉",
                 "That's everything! You now know how to:\n"
-                "• Select and chat with agents\n"
-                "• Manage threads\n"
-                "• Configure settings\n\n"
-                "You can replay this walkthrough anytime from Help → Show Walkthrough.",
+                "• Select agents (🤖) and LLMs (🧠) from the sidebar\n"
+                "• Create and manage chat threads (➕ ✏️ 🗑)\n"
+                "• Send messages (➤) and clear history (↻)\n"
+                "• Access settings (⚙)\n\n"
+                "You can replay this walkthrough anytime from Help → Show Walkthrough. Happy chatting!",
                 None
             )
         ]

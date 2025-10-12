@@ -658,6 +658,7 @@ class ChatWidget(QWidget):
 
         # Reset/Clear button with circular icon design
         self.reset_button = QPushButton("↻")
+        self.reset_button.setObjectName("reset_button")
         self.reset_button.setFixedWidth(50)
         self.reset_button.setFixedHeight(50)
         self.reset_button.setToolTip("Clear chat")

@@ -168,18 +168,9 @@ class MainWindow(QMainWindow):
         """
         # Create the menu bar
         menu_bar = self.menuBar()
-        
+
         # Create the File menu
         file_menu = menu_bar.addMenu("&File")
-        
-        # Add actions to the File menu
-        self.settings_action = QAction("&Settings", self)
-        self.settings_action.setObjectName("settings_action")
-        self.settings_action.setStatusTip("Open settings dialog")
-        self.settings_action.triggered.connect(self.open_settings)
-        file_menu.addAction(self.settings_action)
-
-        file_menu.addSeparator()
 
         # Add copyright/developer credit
         credit_action = QAction("Built by Keshav", self)
@@ -193,7 +184,7 @@ class MainWindow(QMainWindow):
         exit_action.setStatusTip("Exit the application")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
+
         # Create the Help menu
         help_menu = menu_bar.addMenu("&Help")
 
@@ -209,21 +200,62 @@ class MainWindow(QMainWindow):
         about_action.setStatusTip("Show the application's About box")
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+
+        # Add a spacer to push settings button to the right
+        from PyQt6.QtWidgets import QSizePolicy
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        menu_bar.setCornerWidget(spacer, Qt.Corner.TopLeftCorner)
+
+        # Add settings icon button on the right side
+        self.settings_action = QAction("⚙", self)
+        self.settings_action.setObjectName("settings_action")
+        self.settings_action.setStatusTip("Open settings")
+        self.settings_action.triggered.connect(self.open_settings)
+
+        # Create a widget to hold the settings button
+        settings_widget = QWidget()
+        settings_layout = QHBoxLayout(settings_widget)
+        settings_layout.setContentsMargins(8, 0, 8, 0)
+        settings_layout.setSpacing(0)
+
+        from PyQt6.QtWidgets import QPushButton
+        settings_btn = QPushButton("⚙")
+        settings_btn.setFixedSize(32, 32)
+        settings_btn.setToolTip("Settings")
+        settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        settings_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #9ca3af;
+                border: none;
+                border-radius: 6px;
+                font-size: 18px;
+                padding: 0px;
+                text-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+            }
+            QPushButton:hover {
+                background: #3f3f46;
+                color: #e5e7eb;
+                text-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+            }
+            QPushButton:pressed {
+                background: #3b82f6;
+                color: white;
+                text-shadow: 0 0 15px rgba(255, 255, 255, 0.6);
+            }
+        """)
+        settings_btn.clicked.connect(self.open_settings)
+        settings_layout.addWidget(settings_btn)
+
+        menu_bar.setCornerWidget(settings_widget, Qt.Corner.TopRightCorner)
         
     def create_toolbar(self):
         """
         Create the toolbar
         """
-        # Create the toolbar
-        toolbar = QToolBar("Main Toolbar")
-        toolbar.setIconSize(QSize(16, 16))
-        self.addToolBar(toolbar)
-        
-        # Add actions to the toolbar
-        settings_action = QAction("Settings", self)
-        settings_action.setStatusTip("Open settings dialog")
-        settings_action.triggered.connect(self.open_settings)
-        toolbar.addAction(settings_action)
+        # Toolbar removed - settings button now in menu bar corner
+        pass
         
     def connect_signals(self):
         """
@@ -305,6 +337,8 @@ class MainWindow(QMainWindow):
         # Agent selector widgets
         if hasattr(self.agent_selector, 'agents_list'):
             self.agent_selector.agents_list.setObjectName("agent_list")
+        if hasattr(self.agent_selector, 'llms_list'):
+            self.agent_selector.llms_list.setObjectName("llms_list")
         if hasattr(self.agent_selector, 'refresh_agents_button'):
             self.agent_selector.refresh_agents_button.setObjectName("refresh_agents_button")
 
@@ -325,6 +359,8 @@ class MainWindow(QMainWindow):
             self.chat_widget.message_input.setObjectName("message_input")
         if hasattr(self.chat_widget, 'send_button'):
             self.chat_widget.send_button.setObjectName("send_button")
+        if hasattr(self.chat_widget, 'reset_button'):
+            self.chat_widget.reset_button.setObjectName("reset_button")
     
     def closeEvent(self, event):
         """
