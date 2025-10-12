@@ -43,7 +43,7 @@ class PulsingDotDelegate(QStyledItemDelegate):
             self.parent().viewport().update()
 
     def paint(self, painter, option, index):
-        """Custom paint method to draw pulsing glow"""
+        """Custom paint method to draw pulsing dot"""
         # Call the default paint first
         super().paint(painter, option, index)
 
@@ -56,49 +56,33 @@ class PulsingDotDelegate(QStyledItemDelegate):
 
         if is_active:
             import math
-            from PyQt6.QtGui import QRadialGradient, QPen
+            from PyQt6.QtGui import QPen
 
-            # Calculate pulse opacity
-            opacity = 0.6 + 0.4 * abs(math.sin(self._pulse_step * math.pi / 50))
+            # Calculate pulse opacity - from 0 (invisible) to 1 (fully visible)
+            opacity = abs(math.sin(self._pulse_step * math.pi / 50))
 
-            # Determine glow color based on list type - use contrasting colors
+            # Determine color based on list type
             list_widget = self.parent()
             if hasattr(list_widget, 'objectName'):
                 # Bright yellow for LLMs (stands out against green selection)
                 # Orange for Agents (contrasts with purple selection)
-                glow_color = QColor("#fbbf24") if "llm" in list_widget.objectName().lower() else QColor("#f97316")
+                dot_color = QColor("#fbbf24") if "llm" in list_widget.objectName().lower() else QColor("#f97316")
             else:
-                glow_color = QColor("#f97316")
+                dot_color = QColor("#f97316")
 
-            # Draw pulsing glow around the emoji icon area
+            # Draw concentrated pulsing dot on the right side
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-            # Create radial gradient for glow effect
-            glow_center_x = option.rect.left() + 30  # Position over the emoji
-            glow_center_y = option.rect.center().y()
+            # Position dot on the right side with some padding
+            dot_center_x = option.rect.right() - 15  # 15px from right edge
+            dot_center_y = option.rect.center().y()
+            dot_radius = 4  # Small concentrated dot
 
-            gradient = QRadialGradient(glow_center_x, glow_center_y, 22)  # Reduced radius
-
-            # Bright center
-            center_color = QColor(glow_color)
-            center_color.setAlphaF(opacity * 0.85)
-            gradient.setColorAt(0, center_color)
-
-            # Mid glow
-            mid_color = QColor(glow_color)
-            mid_color.setAlphaF(opacity * 0.45)
-            gradient.setColorAt(0.5, mid_color)
-
-            # Outer glow (fade out)
-            outer_color = QColor(glow_color)
-            outer_color.setAlphaF(0)
-            gradient.setColorAt(1, outer_color)
-
-            painter.setBrush(QBrush(gradient))
+            # Draw solid circle with pulsing opacity
+            dot_color.setAlphaF(opacity)
+            painter.setBrush(QBrush(dot_color))
             painter.setPen(Qt.PenStyle.NoPen)
-
-            # Draw the glow circle - reduced radius
-            painter.drawEllipse(glow_center_x - 22, glow_center_y - 22, 44, 44)
+            painter.drawEllipse(dot_center_x - dot_radius, dot_center_y - dot_radius, dot_radius * 2, dot_radius * 2)
 
 
 class AgentSelector(QWidget):
