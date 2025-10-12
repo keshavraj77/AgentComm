@@ -504,87 +504,96 @@ class ChatWidget(QWidget):
         self.thread_selector.currentIndexChanged.connect(self.on_thread_changed)
         self.thread_header.addWidget(self.thread_selector)
 
-        # New thread button
-        self.new_thread_btn = QPushButton("New")
-        self.new_thread_btn.setFixedWidth(60)
+        # New thread button (icon only)
+        self.new_thread_btn = QPushButton("➕")
+        self.new_thread_btn.setFixedWidth(36)
+        self.new_thread_btn.setFixedHeight(36)
+        self.new_thread_btn.setToolTip("New chat")
+        self.new_thread_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.new_thread_btn.setStyleSheet("""
             QPushButton {
-                background: #3b82f6;
-                color: white;
+                background: transparent;
+                color: #6b7280;
                 border: none;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 600;
-                padding: 6px 8px;
+                border-radius: 18px;
+                font-size: 16px;
+                padding: 0px;
             }
             QPushButton:hover {
+                background: #3b82f6;
+                color: white;
+            }
+            QPushButton:pressed {
                 background: #2563eb;
+                color: white;
             }
         """)
         self.new_thread_btn.clicked.connect(self.create_new_thread)
         self.thread_header.addWidget(self.new_thread_btn)
 
-        # Rename thread button
-        self.rename_thread_btn = QPushButton("Rename")
-        self.rename_thread_btn.setFixedWidth(70)
+        # Rename thread button (icon only)
+        self.rename_thread_btn = QPushButton("✏️")
+        self.rename_thread_btn.setFixedWidth(36)
+        self.rename_thread_btn.setFixedHeight(36)
+        self.rename_thread_btn.setToolTip("Rename chat")
+        self.rename_thread_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.rename_thread_btn.setStyleSheet("""
             QPushButton {
-                background: #3f3f46;
-                color: #e5e7eb;
+                background: transparent;
+                color: #6b7280;
                 border: none;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 600;
-                padding: 6px 8px;
+                border-radius: 18px;
+                font-size: 16px;
+                padding: 0px;
             }
             QPushButton:hover {
                 background: #52525b;
+                color: white;
+            }
+            QPushButton:pressed {
+                background: #3f3f46;
+                color: white;
+            }
+            QPushButton:disabled {
+                color: #4b5563;
+                background: transparent;
             }
         """)
         self.rename_thread_btn.clicked.connect(self.rename_current_thread)
         self.thread_header.addWidget(self.rename_thread_btn)
 
-        # Delete thread button
-        self.delete_thread_btn = QPushButton("Delete")
-        self.delete_thread_btn.setFixedWidth(70)
+        self.thread_header.addStretch()
+
+        # Delete thread button (trash icon in top right corner)
+        self.delete_thread_btn = QPushButton("🗑")
+        self.delete_thread_btn.setFixedWidth(36)
+        self.delete_thread_btn.setFixedHeight(36)
+        self.delete_thread_btn.setToolTip("Delete chat")
+        self.delete_thread_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.delete_thread_btn.setStyleSheet("""
             QPushButton {
-                background: #3f3f46;
-                color: #e5e7eb;
+                background: transparent;
+                color: #6b7280;
                 border: none;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 600;
-                padding: 6px 8px;
+                border-radius: 18px;
+                font-size: 18px;
+                padding: 0px;
             }
             QPushButton:hover {
                 background: #ef4444;
+                color: white;
+            }
+            QPushButton:pressed {
+                background: #dc2626;
+                color: white;
+            }
+            QPushButton:disabled {
+                color: #4b5563;
+                background: transparent;
             }
         """)
         self.delete_thread_btn.clicked.connect(self.delete_current_thread)
         self.thread_header.addWidget(self.delete_thread_btn)
-
-        # Clear chat button
-        self.clear_chat_btn = QPushButton("Clear")
-        self.clear_chat_btn.setFixedWidth(60)
-        self.clear_chat_btn.setStyleSheet("""
-            QPushButton {
-                background: #3f3f46;
-                color: #e5e7eb;
-                border: none;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 600;
-                padding: 6px 8px;
-            }
-            QPushButton:hover {
-                background: #ef4444;
-            }
-        """)
-        self.clear_chat_btn.clicked.connect(self.reset_thread)
-        self.thread_header.addWidget(self.clear_chat_btn)
-
-        self.thread_header.addStretch()
 
         self.layout.addLayout(self.thread_header)
 
@@ -646,18 +655,47 @@ class ChatWidget(QWidget):
         """)
         self.input_layout.addWidget(self.message_input, 1)
 
-        self.send_button = QPushButton("Send")
-        self.send_button.setFixedWidth(80)
+        # Reset/Clear button with circular icon design
+        self.reset_button = QPushButton("↻")
+        self.reset_button.setFixedWidth(50)
+        self.reset_button.setFixedHeight(50)
+        self.reset_button.setToolTip("Clear chat")
+        self.reset_button.setStyleSheet("""
+            QPushButton {
+                background: #3f3f46;
+                color: #e5e7eb;
+                border: none;
+                border-radius: 25px;
+                font-size: 24px;
+                font-weight: bold;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background: #ef4444;
+                color: white;
+            }
+            QPushButton:pressed {
+                background: #dc2626;
+            }
+        """)
+        self.reset_button.clicked.connect(self.reset_thread)
+        self.input_layout.addWidget(self.reset_button)
+
+        # Send button with icon
+        self.send_button = QPushButton("➤")
+        self.send_button.setFixedWidth(50)
         self.send_button.setFixedHeight(50)
+        self.send_button.setToolTip("Send message")
+        self.send_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.send_button.setStyleSheet("""
             QPushButton {
                 background: #3b82f6;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: 600;
-                padding: 12px;
+                border-radius: 25px;
+                font-size: 20px;
+                font-weight: bold;
+                padding: 0px;
             }
             QPushButton:hover {
                 background: #2563eb;
@@ -870,8 +908,8 @@ class ChatWidget(QWidget):
                     # Check if this is the first user message (chat history is empty or has only this message)
                     history = self.session_manager.get_current_chat_history()
                     if history and len(history.messages) == 0:
-                        # Auto-rename to first 10 chars of message
-                        new_title = message[:10] + ("..." if len(message) > 10 else "")
+                        # Auto-rename to first 25 chars of message
+                        new_title = message[:25] + ("..." if len(message) > 25 else "")
                         self.session_manager.rename_thread(current_thread.thread_id, new_title)
                         # Schedule thread list refresh in main thread
                         QMetaObject.invokeMethod(self, "refresh_thread_list", Qt.ConnectionType.QueuedConnection)
@@ -1160,7 +1198,6 @@ class ChatWidget(QWidget):
         has_threads = len(threads) > 0
         self.rename_thread_btn.setEnabled(has_threads)
         self.delete_thread_btn.setEnabled(has_threads and len(threads) > 1)
-        self.clear_chat_btn.setEnabled(has_threads)
 
     def on_thread_changed(self, index: int):
         """
@@ -1204,12 +1241,14 @@ class ChatWidget(QWidget):
             logger.warning("No thread selected")
             return
 
-        # Prompt for new name
-        new_title, ok = QInputDialog.getText(
+        # Use styled input dialog
+        from agentcomm.ui.custom_dialogs import StyledInputDialog
+
+        new_title, ok = StyledInputDialog.get_text_input(
             self,
             "Rename Thread",
             "Enter new thread name:",
-            text=current_thread.title
+            current_thread.title
         )
 
         if ok and new_title.strip():
