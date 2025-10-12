@@ -6,7 +6,11 @@ Chat Widget for A2A Client
 import logging
 import asyncio
 import threading
+import markdown
 from typing import Optional, Dict, Any, List
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.formatters import HtmlFormatter
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit,
@@ -19,6 +23,196 @@ from agentcomm.core.session_manager import SessionManager
 from agentcomm.llm.chat_history import ChatHistory, ChatMessage
 
 logger = logging.getLogger(__name__)
+
+
+def markdown_to_html(text: str) -> str:
+    """
+    Convert Markdown text to styled HTML
+
+    Args:
+        text: Markdown formatted text
+
+    Returns:
+        HTML formatted text with styling
+    """
+    # Convert markdown to HTML
+    md = markdown.Markdown(extensions=['fenced_code', 'codehilite', 'tables', 'nl2br'])
+    html = md.convert(text)
+
+    # Add custom CSS styling with syntax highlighting
+    styled_html = f"""
+    <style>
+        body {{
+            color: #e5e7eb;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+        }}
+
+        strong, b {{
+            font-weight: 600;
+            color: #ffffff;
+        }}
+
+        em, i {{
+            font-style: italic;
+            color: #d1d5db;
+        }}
+
+        code {{
+            background: #2a2a2a;
+            color: #10b981;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+        }}
+
+        pre {{
+            background: #1e1e1e;
+            border: 1px solid #3f3f46;
+            border-radius: 8px;
+            padding: 12px;
+            overflow-x: auto;
+            overflow-y: visible;
+            margin: 8px 0;
+            max-width: 100%;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }}
+
+        pre code {{
+            background: transparent;
+            padding: 0;
+            color: #e5e7eb;
+            display: block;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }}
+
+        /* Syntax highlighting for code blocks (VS Code Dark+ theme) */
+        /* Works for Python, JavaScript, Java, C++, C#, Go, Rust, and more */
+        .codehilite {{ background: #1e1e1e; }}
+        .codehilite pre {{ margin: 0; background: transparent; }}
+
+        /* Keywords (def, class, if, for, function, const, let, var, etc) */
+        .codehilite .k {{ color: #569cd6; font-weight: bold; }}
+        .codehilite .kn {{ color: #c586c0; }}  /* keyword namespace (import, package) */
+        .codehilite .kd {{ color: #569cd6; }}  /* keyword declaration (var, let, const) */
+        .codehilite .kr {{ color: #569cd6; }}  /* keyword reserved */
+        .codehilite .kt {{ color: #569cd6; }}  /* keyword type */
+        .codehilite .kc {{ color: #569cd6; }}  /* keyword constant (True, False, None, null) */
+
+        /* Function and class names */
+        .codehilite .nf {{ color: #dcdcaa; }}  /* function name */
+        .codehilite .nc {{ color: #4ec9b0; }}  /* class name */
+        .codehilite .nb {{ color: #4ec9b0; }}  /* built-in (print, len, console, etc) */
+        .codehilite .nn {{ color: #4ec9b0; }}  /* namespace name */
+        .codehilite .nd {{ color: #dcdcaa; }}  /* decorator (@decorator) */
+
+        /* Variables and identifiers */
+        .codehilite .n {{ color: #9cdcfe; }}  /* variable name */
+        .codehilite .nx {{ color: #9cdcfe; }}  /* variable (JS) */
+        .codehilite .na {{ color: #9cdcfe; }}  /* attribute name */
+        .codehilite .bp {{ color: #4ec9b0; }}  /* built-in pseudo (self, this, True, False) */
+
+        /* Strings */
+        .codehilite .s {{ color: #ce9178; }}   /* string */
+        .codehilite .s1 {{ color: #ce9178; }}  /* single quoted string */
+        .codehilite .s2 {{ color: #ce9178; }}  /* double quoted string */
+        .codehilite .sb {{ color: #ce9178; }}  /* backtick string */
+        .codehilite .sc {{ color: #ce9178; }}  /* char */
+        .codehilite .sd {{ color: #ce9178; }}  /* docstring */
+
+        /* Numbers */
+        .codehilite .mi {{ color: #b5cea8; }}  /* integer */
+        .codehilite .mf {{ color: #b5cea8; }}  /* float */
+        .codehilite .mh {{ color: #b5cea8; }}  /* hex */
+        .codehilite .mo {{ color: #b5cea8; }}  /* octal */
+
+        /* Comments */
+        .codehilite .c {{ color: #6a9955; font-style: italic; }}   /* comment */
+        .codehilite .c1 {{ color: #6a9955; font-style: italic; }}  /* single line comment */
+        .codehilite .cm {{ color: #6a9955; font-style: italic; }}  /* multi-line comment */
+        .codehilite .cp {{ color: #6a9955; font-style: italic; }}  /* preprocessor comment */
+
+        /* Operators and punctuation */
+        .codehilite .o {{ color: #d4d4d4; }}   /* operator */
+        .codehilite .p {{ color: #d4d4d4; }}   /* punctuation */
+        .codehilite .w {{ color: #d4d4d4; }}   /* whitespace */
+
+        /* Special for templates and regex */
+        .codehilite .sr {{ color: #d16969; }}  /* regex */
+        .codehilite .si {{ color: #d7ba7d; }}  /* string interpolation */
+
+        /* HTML/XML */
+        .codehilite .nt {{ color: #569cd6; }}  /* tag name */
+        .codehilite .err {{ color: #f44747; }}  /* error */
+
+        h1, h2, h3, h4, h5, h6 {{
+            color: #ffffff;
+            font-weight: 600;
+            margin-top: 16px;
+            margin-bottom: 8px;
+        }}
+
+        h1 {{ font-size: 24px; }}
+        h2 {{ font-size: 20px; }}
+        h3 {{ font-size: 18px; }}
+        h4 {{ font-size: 16px; }}
+
+        ul, ol {{
+            margin: 8px 0;
+            padding-left: 24px;
+        }}
+
+        li {{
+            margin: 4px 0;
+        }}
+
+        blockquote {{
+            border-left: 4px solid #3b82f6;
+            padding-left: 12px;
+            margin: 8px 0;
+            color: #9ca3af;
+            font-style: italic;
+        }}
+
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 8px 0;
+        }}
+
+        th, td {{
+            border: 1px solid #3f3f46;
+            padding: 8px;
+            text-align: left;
+        }}
+
+        th {{
+            background: #2a2a2a;
+            font-weight: 600;
+        }}
+
+        a {{
+            color: #3b82f6;
+            text-decoration: none;
+        }}
+
+        a:hover {{
+            text-decoration: underline;
+        }}
+
+        p {{
+            margin: 8px 0;
+        }}
+    </style>
+    {html}
+    """
+
+    return styled_html
 
 
 # Global event loop for async operations
@@ -165,7 +359,9 @@ class MessageWidget(QFrame):
             # QTextEdit for AI messages (needed for streaming updates)
             message_text = QTextEdit()
             message_text.setReadOnly(True)
-            message_text.setPlainText(message)
+            # Convert markdown to HTML and display
+            html_content = markdown_to_html(message)
+            message_text.setHtml(html_content)
             message_text.setFrameStyle(QFrame.Shape.NoFrame)
 
             # Enable word wrapping
@@ -202,10 +398,12 @@ class MessageWidget(QFrame):
             def adjust_height():
                 # Use the actual document height instead of size().height()
                 doc = message_text.document()
+                # Set text width to viewport width for proper wrapping
+                doc.setTextWidth(message_text.viewport().width())
                 doc_height = doc.size().height()
 
-                # Set fixed height based on content
-                height = int(doc_height) + 2
+                # Set fixed height based on content with extra padding
+                height = int(doc_height) + 10
                 message_text.setFixedHeight(height)
 
             message_text.document().contentsChanged.connect(adjust_height)
@@ -608,12 +806,16 @@ class ChatWidget(QWidget):
             def recalculate_height():
                 text_edit = message_widget.findChild(QTextEdit)
                 if text_edit:
+                    # Force document to recalculate layout with current width
+                    text_edit.document().setTextWidth(text_edit.viewport().width())
                     doc_height = text_edit.document().size().height()
-                    height = int(doc_height) + 2
+                    height = int(doc_height) + 10  # Add extra padding for wrapped content
                     text_edit.setFixedHeight(height)
 
             # Use a single-shot timer to recalculate after the widget is rendered
             QTimer.singleShot(0, recalculate_height)
+            # Also recalculate on resize
+            QTimer.singleShot(100, recalculate_height)
 
         # Scroll to the bottom
         self.chat_scroll_area.verticalScrollBar().setValue(
@@ -729,7 +931,9 @@ class ChatWidget(QWidget):
                         # Update the widget with the final streaming response
                         message_text = widget.findChild(QTextEdit)
                         if message_text and self.streaming_response:
-                            message_text.setPlainText(self.streaming_response)
+                            # Convert markdown to HTML and display
+                            html_content = markdown_to_html(self.streaming_response)
+                            message_text.setHtml(html_content)
                             logger.debug(f"Updated streaming widget with final text: {self.streaming_response[:50]}...")
 
                         # Mark as no longer streaming (don't delete the attribute)
@@ -889,10 +1093,13 @@ class ChatWidget(QWidget):
             # Update the existing widget
             message_text = streaming_widget.findChild(QTextEdit)
             if message_text:
-                message_text.setPlainText(self.streaming_response)
+                # Convert markdown to HTML and display
+                html_content = markdown_to_html(self.streaming_response)
+                message_text.setHtml(html_content)
                 # Manually trigger height recalculation for streaming updates
+                message_text.document().setTextWidth(message_text.viewport().width())
                 doc_height = message_text.document().size().height()
-                height = int(doc_height) + 2
+                height = int(doc_height) + 10
                 message_text.setFixedHeight(height)
         else:
             # Create a new widget with container
