@@ -40,7 +40,7 @@ class Thread:
         self.entity_id = entity_id
         self.entity_type = entity_type
         self.created_at = created_at or datetime.now()
-        self.title = title or f"Thread {self.created_at.strftime('%H:%M:%S')}"
+        self.title = title or f"Chat {self.created_at.strftime('%H:%M:%S')}"
         self.chat_history = chat_history or ChatHistory()
 
     def rename(self, new_title: str) -> None:

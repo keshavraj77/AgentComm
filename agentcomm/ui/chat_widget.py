@@ -167,6 +167,12 @@ class MessageWidget(QFrame):
             message_text.setReadOnly(True)
             message_text.setPlainText(message)
             message_text.setFrameStyle(QFrame.Shape.NoFrame)
+
+            # Enable word wrapping
+            message_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            from PyQt6.QtGui import QTextOption
+            message_text.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+
             message_text.setStyleSheet("""
                 background-color: transparent;
                 color: #e5e7eb;
@@ -188,16 +194,22 @@ class MessageWidget(QFrame):
             from PyQt6.QtGui import QTextOption
             message_text.document().setDefaultTextOption(QTextOption(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop))
 
-            # Set width for proper text wrapping calculation
-            message_text.setMaximumWidth(700)
-            doc.setTextWidth(700)
+            # Set size policy to expand vertically as needed
+            from PyQt6.QtWidgets import QSizePolicy
+            message_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
-            # Calculate height based on content - must be done after setting width
-            doc_height = doc.size().height()
-            # Add small buffer for proper display, no maximum limit
-            calculated_height = int(doc_height) + 5
-            message_text.setMinimumHeight(calculated_height)
-            message_text.setMaximumHeight(calculated_height)
+            # Connect document size changed signal to adjust height
+            def adjust_height():
+                # Use the actual document height instead of size().height()
+                doc = message_text.document()
+                doc_height = doc.size().height()
+
+                # Set fixed height based on content
+                height = int(doc_height) + 2
+                message_text.setFixedHeight(height)
+
+            message_text.document().contentsChanged.connect(adjust_height)
+            adjust_height()  # Call immediately for initial content
 
             layout.addWidget(message_text, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -241,7 +253,7 @@ class ChatWidget(QWidget):
         self.thread_header.setSpacing(10)
 
         # Thread selector label
-        thread_label = QLabel("Thread:")
+        thread_label = QLabel("Chats:")
         thread_label.setStyleSheet("""
             color: #9ca3af;
             font-size: 12px;
@@ -259,13 +271,29 @@ class ChatWidget(QWidget):
                 border: 1px solid #3f3f46;
                 border-radius: 6px;
                 padding: 6px 10px;
+                padding-right: 25px;
                 font-size: 12px;
             }
             QComboBox:hover {
                 border: 1px solid #3b82f6;
             }
             QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 20px;
                 border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #9ca3af;
+                width: 0px;
+                height: 0px;
+                margin-right: 5px;
+            }
+            QComboBox::down-arrow:hover {
+                border-top: 5px solid #3b82f6;
             }
             QComboBox QAbstractItemView {
                 background: #2a2a2a;
@@ -561,22 +589,31 @@ class ChatWidget(QWidget):
         # Create the message widget
         message_widget = MessageWidget(message, sender, is_user)
 
-        # Set max width for better readability
         # User messages: no max width, let them shrink to content
-        # AI messages: limit width for readability
-        if not is_user:
-            message_widget.setMaximumWidth(700)
+        # AI messages: no max width, use full available width
 
         if is_user:
             # User messages: add spacer on left, message on right
             container_layout.addStretch()
             container_layout.addWidget(message_widget)
         else:
-            # AI messages: message on left, spacer on right
+            # AI messages: full width, no spacer
             container_layout.addWidget(message_widget)
-            container_layout.addStretch()
 
         self.chat_layout.addWidget(container)
+
+        # For AI messages, schedule a height recalculation after the widget is rendered
+        # This ensures the QTextEdit has the correct width for proper height calculation
+        if not is_user:
+            def recalculate_height():
+                text_edit = message_widget.findChild(QTextEdit)
+                if text_edit:
+                    doc_height = text_edit.document().size().height()
+                    height = int(doc_height) + 2
+                    text_edit.setFixedHeight(height)
+
+            # Use a single-shot timer to recalculate after the widget is rendered
+            QTimer.singleShot(0, recalculate_height)
 
         # Scroll to the bottom
         self.chat_scroll_area.verticalScrollBar().setValue(
@@ -623,6 +660,20 @@ class ChatWidget(QWidget):
             on_complete: Callback to call when the message is sent
         """
         try:
+            # Auto-rename thread if it's the first user message and thread has default name
+            current_thread = self.session_manager.get_current_thread()
+            if current_thread:
+                # Check if thread has default "Chat HH:MM:SS" format name
+                if current_thread.title.startswith("Chat ") and len(current_thread.title) == 13:
+                    # Check if this is the first user message (chat history is empty or has only this message)
+                    history = self.session_manager.get_current_chat_history()
+                    if history and len(history.messages) == 0:
+                        # Auto-rename to first 10 chars of message
+                        new_title = message[:10] + ("..." if len(message) > 10 else "")
+                        self.session_manager.rename_thread(current_thread.thread_id, new_title)
+                        # Schedule thread list refresh in main thread
+                        QMetaObject.invokeMethod(self, "refresh_thread_list", Qt.ConnectionType.QueuedConnection)
+
             # Send the message
             await self.session_manager.send_message(message)
 
@@ -640,8 +691,8 @@ class ChatWidget(QWidget):
         except Exception as e:
             logger.error(f"Error sending message: {e}")
             QMetaObject.invokeMethod(self, "on_error_received", Qt.ConnectionType.QueuedConnection, Q_ARG(str, str(e)))
-            # Stop the update timer
-            QMetaObject.invokeMethod(self.update_timer, "stop", Qt.ConnectionType.QueuedConnection)
+            # Stop the update timer using a helper slot
+            QMetaObject.invokeMethod(self, "_stop_update_timer", Qt.ConnectionType.QueuedConnection)
 
     @pyqtSlot()
     def _do_final_update(self):
@@ -650,6 +701,13 @@ class ChatWidget(QWidget):
         """
         self.update_streaming_message()
         self._finalize_streaming_message()
+
+    @pyqtSlot()
+    def _stop_update_timer(self):
+        """
+        Stop the update timer (must be called from main thread)
+        """
+        self.update_timer.stop()
 
     def _finalize_streaming_message(self):
         """
@@ -672,13 +730,6 @@ class ChatWidget(QWidget):
                         message_text = widget.findChild(QTextEdit)
                         if message_text and self.streaming_response:
                             message_text.setPlainText(self.streaming_response)
-                            # Update the height - ensure full content is visible
-                            doc = message_text.document()
-                            doc.setTextWidth(700)
-                            doc_height = doc.size().height()
-                            calculated_height = int(doc_height) + 5
-                            message_text.setMinimumHeight(calculated_height)
-                            message_text.setMaximumHeight(calculated_height)
                             logger.debug(f"Updated streaming widget with final text: {self.streaming_response[:50]}...")
 
                         # Mark as no longer streaming (don't delete the attribute)
@@ -839,14 +890,10 @@ class ChatWidget(QWidget):
             message_text = streaming_widget.findChild(QTextEdit)
             if message_text:
                 message_text.setPlainText(self.streaming_response)
-
-                # Update the height - ensure full content is visible
-                doc = message_text.document()
-                doc.setTextWidth(700)
-                doc_height = doc.size().height()
-                calculated_height = int(doc_height) + 5
-                message_text.setMinimumHeight(calculated_height)
-                message_text.setMaximumHeight(calculated_height)
+                # Manually trigger height recalculation for streaming updates
+                doc_height = message_text.document().size().height()
+                height = int(doc_height) + 2
+                message_text.setFixedHeight(height)
         else:
             # Create a new widget with container
             logger.debug(f"Creating new streaming widget for entity: {self.current_entity_id}")
@@ -860,11 +907,9 @@ class ChatWidget(QWidget):
             # Create message widget
             streaming_widget = MessageWidget(self.streaming_response, self.current_entity_id or "Assistant", is_user=False)
             streaming_widget.is_streaming = True
-            streaming_widget.setMaximumWidth(700)
 
-            # AI message - left aligned
+            # AI message - full width, no spacer
             container_layout.addWidget(streaming_widget)
-            container_layout.addStretch()
 
             self.chat_layout.addWidget(container)
 

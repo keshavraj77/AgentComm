@@ -129,6 +129,10 @@ class SessionManager:
             # Select or create thread
             if thread_id and thread_id in self.threads[agent_id]:
                 self.current_thread_id = thread_id
+            elif self.threads[agent_id]:
+                # Select the most recent thread
+                most_recent = max(self.threads[agent_id].values(), key=lambda t: t.created_at)
+                self.current_thread_id = most_recent.thread_id
             else:
                 # Create a new thread
                 self.current_thread_id = self.create_thread(agent_id, "agent")
@@ -166,6 +170,10 @@ class SessionManager:
             # Select or create thread
             if thread_id and thread_id in self.threads[llm_id]:
                 self.current_thread_id = thread_id
+            elif self.threads[llm_id]:
+                # Select the most recent thread
+                most_recent = max(self.threads[llm_id].values(), key=lambda t: t.created_at)
+                self.current_thread_id = most_recent.thread_id
             else:
                 # Create a new thread
                 self.current_thread_id = self.create_thread(llm_id, "llm")
