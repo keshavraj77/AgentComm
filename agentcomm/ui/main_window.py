@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
         self.main_layout.addWidget(self.splitter)
         
         # Create the agent selector
-        self.agent_selector = AgentSelector(self.agent_registry, self.llm_router)
+        self.agent_selector = AgentSelector(self.agent_registry, self.llm_router, self.session_manager)
         self.splitter.addWidget(self.agent_selector)
         
         # Create the chat widget

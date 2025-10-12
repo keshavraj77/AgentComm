@@ -268,7 +268,7 @@ class MessageWidget(QFrame):
     Widget for displaying a single message in the chat
     """
 
-    def __init__(self, message: str, sender: str, is_user: bool = False, parent: Optional[QWidget] = None):
+    def __init__(self, message: str, sender: str, is_user: bool = False, sender_icon: str = "🤖", parent: Optional[QWidget] = None):
         """
         Initialize the message widget
 
@@ -276,6 +276,7 @@ class MessageWidget(QFrame):
             message: Message text
             sender: Sender name
             is_user: Whether the message is from the user
+            sender_icon: Icon to display before sender name (default: robot emoji)
             parent: Parent widget
         """
         super().__init__(parent)
@@ -325,7 +326,7 @@ class MessageWidget(QFrame):
 
         # Only show sender label for AI messages (not for user)
         if not is_user:
-            sender_label = QLabel(sender)
+            sender_label = QLabel(f"{sender_icon}  {sender}")
             sender_label.setStyleSheet("""
                 font-weight: 600;
                 color: #9ca3af;
@@ -822,8 +823,13 @@ class ChatWidget(QWidget):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
 
+        # Determine the icon based on entity type
+        sender_icon = "🤖"  # Default to agent icon
+        if not is_user and self.current_entity_type == "llm":
+            sender_icon = "🧠"  # Use brain icon for LLMs
+
         # Create the message widget
-        message_widget = MessageWidget(message, sender, is_user)
+        message_widget = MessageWidget(message, sender, is_user, sender_icon)
 
         # User messages: no max width, let them shrink to content
         # AI messages: no max width, use full available width
@@ -1149,8 +1155,13 @@ class ChatWidget(QWidget):
             container_layout.setContentsMargins(0, 0, 0, 0)
             container_layout.setSpacing(0)
 
+            # Determine the icon based on entity type
+            sender_icon = "🤖"  # Default to agent icon
+            if self.current_entity_type == "llm":
+                sender_icon = "🧠"  # Use brain icon for LLMs
+
             # Create message widget
-            streaming_widget = MessageWidget(self.streaming_response, self.current_entity_id or "Assistant", is_user=False)
+            streaming_widget = MessageWidget(self.streaming_response, self.current_entity_id or "Assistant", is_user=False, sender_icon=sender_icon)
             streaming_widget.is_streaming = True
 
             # AI message - full width, no spacer
