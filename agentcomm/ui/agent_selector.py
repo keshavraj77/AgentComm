@@ -154,15 +154,15 @@ class AgentSelector(QWidget):
                 border: 2px solid qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #667eea, stop:1 #764ba2);
                 border-radius: 12px;
-                margin-top: 12px;
-                padding-top: 20px;
+                margin-top: 10px;
+                padding-top: 28px;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(102, 126, 234, 0.05), stop:1 rgba(118, 75, 162, 0.05));
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 8px 12px;
+                padding: 12px 12px;
                 background: transparent;
                 color: #a78bfa;
                 font-weight: 700;
@@ -247,15 +247,15 @@ class AgentSelector(QWidget):
                 border: 2px solid qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #10b981, stop:1 #059669);
                 border-radius: 12px;
-                margin-top: 12px;
-                padding-top: 20px;
+                margin-top: 10px;
+                padding-top: 28px;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(16, 185, 129, 0.05), stop:1 rgba(5, 150, 105, 0.05));
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 8px 12px;
+                padding: 12px 12px;
                 background: transparent;
                 color: #34d399;
                 font-weight: 700;
