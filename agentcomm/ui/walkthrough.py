@@ -318,28 +318,30 @@ class WalkthroughManager:
             ),
             WalkthroughStep(
                 "💬 Chat Threads",
-                "At the top of the chat area, you'll find the thread dropdown labeled 'Chats:'. "
-                "Threads help you organize multiple conversations. Each thread maintains its own history.",
+                "At the very top of the left sidebar, you'll find the thread dropdown labeled 'Chats:'. "
+                "Threads help you organize multiple conversations. Each thread maintains its own history "
+                "for the currently selected agent or LLM.",
                 "thread_selector",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
                 "➕ New Thread",
-                "Click this plus button (➕) to create a new conversation thread. "
-                "This allows you to have multiple separate conversations with different agents or LLMs.",
+                "Right next to the thread dropdown, click the plus button (➕) to create a new conversation thread. "
+                "This allows you to have multiple separate conversations with the same agent or LLM.",
                 "new_thread_button",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
                 "✏️ Rename Thread",
-                "Click the pencil icon (✏️) to give your threads meaningful names. "
+                "Click the pencil icon (✏️) next to the plus button to give your threads meaningful names. "
                 "This helps you organize and find specific conversations later.",
                 "rename_thread_button",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
                 "🗑 Delete Thread",
-                "Click the trash icon (🗑) in the top-right to remove unwanted threads. "
+                "Click the trash icon (🗑) in the top-right corner of the chat area to remove unwanted threads. "
+                "Note: The delete button is in the chat area, while thread selection is in the sidebar. "
                 "Be careful - this action cannot be undone!",
                 "delete_thread_button",
                 (-5, -5, 5, 5)
@@ -375,19 +377,20 @@ class WalkthroughManager:
             ),
             WalkthroughStep(
                 "⚙ Settings (Top Right)",
-                "Click the gear icon (⚙) in the top-right corner to access settings. "
+                "Click the gear icon (⚙) in the top-right corner of the menu bar to access settings. "
                 "Here you can configure agents, manage LLM API keys, and customize the application. "
-                "Notice the subtle blue glow on the settings icon!",
+                "The icon turns blue when you hover over it!",
                 "settings_action",
                 (-5, -5, 5, 5)
             ),
             WalkthroughStep(
                 "You're All Set! 🎉",
                 "That's everything! You now know how to:\n"
-                "• Select agents (🤖) and LLMs (🧠) from the sidebar\n"
-                "• Create and manage chat threads (➕ ✏️ 🗑)\n"
+                "• Select agents (🤖) and LLMs (🧠) from the left sidebar\n"
+                "• Manage chat threads (💬 ➕ ✏️) at the top of the sidebar\n"
+                "• Delete threads (🗑) from the chat area's top-right\n"
                 "• Send messages (➤) and clear history (↻)\n"
-                "• Access settings (⚙)\n\n"
+                "• Access settings (⚙) in the menu bar\n\n"
                 "You can replay this walkthrough anytime from Help → Show Walkthrough. Happy chatting!",
                 None
             )
