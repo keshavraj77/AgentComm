@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, List
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLabel, QPushButton, QGroupBox, QSplitter, QStyledItemDelegate
+    QLabel, QPushButton, QGroupBox, QSplitter, QStyledItemDelegate, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from PyQt6.QtGui import QIcon, QColor, QPainter, QBrush
@@ -144,6 +144,119 @@ class AgentSelector(QWidget):
         self.layout.setContentsMargins(15, 15, 15, 15)
         self.layout.setSpacing(15)
 
+        # Create thread selector header
+        self.thread_header = QHBoxLayout()
+        self.thread_header.setContentsMargins(0, 0, 0, 0)
+        self.thread_header.setSpacing(8)
+
+        # Thread selector label
+        thread_label = QLabel("Chats:")
+        thread_label.setStyleSheet("""
+            color: #9ca3af;
+            font-size: 12px;
+            font-weight: 600;
+        """)
+        self.thread_header.addWidget(thread_label)
+
+        # Thread dropdown
+        self.thread_selector = QComboBox()
+        self.thread_selector.setStyleSheet("""
+            QComboBox {
+                background: #2a2a2a;
+                color: #e5e7eb;
+                border: 1px solid #3f3f46;
+                border-radius: 6px;
+                padding: 6px 10px;
+                padding-right: 25px;
+                font-size: 12px;
+            }
+            QComboBox:hover {
+                border: 1px solid #3b82f6;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 20px;
+                border: none;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #9ca3af;
+                width: 0px;
+                height: 0px;
+                margin-right: 5px;
+            }
+            QComboBox::down-arrow:hover {
+                border-top: 5px solid #3b82f6;
+            }
+            QComboBox QAbstractItemView {
+                background: #2a2a2a;
+                color: #e5e7eb;
+                selection-background-color: #3b82f6;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
+            }
+        """)
+        self.thread_header.addWidget(self.thread_selector, 1)
+
+        # New thread button (icon only)
+        self.new_thread_btn = QPushButton("➕")
+        self.new_thread_btn.setFixedSize(32, 32)
+        self.new_thread_btn.setToolTip("New chat")
+        self.new_thread_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_thread_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #6b7280;
+                border: none;
+                border-radius: 16px;
+                font-size: 14px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background: #3b82f6;
+                color: white;
+            }
+            QPushButton:pressed {
+                background: #2563eb;
+                color: white;
+            }
+        """)
+        self.thread_header.addWidget(self.new_thread_btn)
+
+        # Rename thread button (icon only)
+        self.rename_thread_btn = QPushButton("✏️")
+        self.rename_thread_btn.setFixedSize(32, 32)
+        self.rename_thread_btn.setToolTip("Rename chat")
+        self.rename_thread_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rename_thread_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #6b7280;
+                border: none;
+                border-radius: 16px;
+                font-size: 14px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background: #52525b;
+                color: white;
+            }
+            QPushButton:pressed {
+                background: #3f3f46;
+                color: white;
+            }
+            QPushButton:disabled {
+                color: #4b5563;
+                background: transparent;
+            }
+        """)
+        self.thread_header.addWidget(self.rename_thread_btn)
+
+        self.layout.addLayout(self.thread_header)
+
         # Create the agents group
         self.agents_group = QGroupBox("Agents")
         self.agents_group.setStyleSheet("""
@@ -173,19 +286,20 @@ class AgentSelector(QWidget):
         # Create the agents list
         self.agents_list = QListWidget()
         self.agents_list.setObjectName("agents_list")
+        self.agents_list.setMaximumHeight(200)
         self.agents_list.setStyleSheet("""
             QListWidget {
                 background: rgba(42, 42, 42, 0.6);
                 color: #e5e7eb;
                 border: none;
                 border-radius: 8px;
-                padding: 6px;
+                padding: 4px;
                 font-size: 13px;
             }
             QListWidget::item {
-                padding: 12px 10px;
+                padding: 8px 10px;
                 border-radius: 6px;
-                margin: 3px 2px;
+                margin: 2px 2px;
                 border: 1px solid transparent;
             }
             QListWidget::item:hover {
@@ -266,19 +380,20 @@ class AgentSelector(QWidget):
         # Create the LLMs list
         self.llms_list = QListWidget()
         self.llms_list.setObjectName("llms_list")
+        self.llms_list.setMaximumHeight(200)
         self.llms_list.setStyleSheet("""
             QListWidget {
                 background: rgba(42, 42, 42, 0.6);
                 color: #e5e7eb;
                 border: none;
                 border-radius: 8px;
-                padding: 6px;
+                padding: 4px;
                 font-size: 13px;
             }
             QListWidget::item {
-                padding: 12px 10px;
+                padding: 8px 10px;
                 border-radius: 6px;
-                margin: 3px 2px;
+                margin: 2px 2px;
                 border: 1px solid transparent;
             }
             QListWidget::item:hover {

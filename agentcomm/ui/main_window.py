@@ -146,6 +146,9 @@ class MainWindow(QMainWindow):
         # Connect signals and slots
         self.connect_signals()
 
+        # Register thread callback for refreshing thread list
+        self.session_manager.register_thread_callback(self._thread_safe_refresh_thread_list)
+
         # Set object names for walkthrough
         self._set_object_names()
 
@@ -232,17 +235,14 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
                 font-size: 18px;
                 padding: 0px;
-                text-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
             }
             QPushButton:hover {
                 background: #3f3f46;
-                color: #e5e7eb;
-                text-shadow: 0 0 12px rgba(59, 130, 246, 0.5);
+                color: #3b82f6;
             }
             QPushButton:pressed {
                 background: #3b82f6;
                 color: white;
-                text-shadow: 0 0 15px rgba(255, 255, 255, 0.6);
             }
         """)
         settings_btn.clicked.connect(self.open_settings)
@@ -264,21 +264,28 @@ class MainWindow(QMainWindow):
         # Connect agent selector signals
         self.agent_selector.agent_selected.connect(self.on_agent_selected)
         self.agent_selector.llm_selected.connect(self.on_llm_selected)
+
+        # Connect thread control signals from agent_selector
+        self.agent_selector.thread_selector.currentIndexChanged.connect(self.on_thread_changed)
+        self.agent_selector.new_thread_btn.clicked.connect(self.create_new_thread)
+        self.agent_selector.rename_thread_btn.clicked.connect(self.rename_current_thread)
         
     @pyqtSlot(str)
     def on_agent_selected(self, agent_id: str):
         """
         Handle agent selection
-        
+
         Args:
             agent_id: ID of the selected agent
         """
         logger.info(f"Agent selected: {agent_id}")
-        
+
         # Select the agent in the session manager
         if self.session_manager.select_agent(agent_id):
             # Update the chat widget
             self.chat_widget.set_current_entity(agent_id, "agent")
+            # Refresh the thread list for this entity
+            self.refresh_thread_list()
             self.status_bar.showMessage(f"Connected to agent: {agent_id}")
         else:
             self.status_bar.showMessage(f"Failed to connect to agent: {agent_id}")
@@ -287,19 +294,124 @@ class MainWindow(QMainWindow):
     def on_llm_selected(self, llm_id: str):
         """
         Handle LLM selection
-        
+
         Args:
             llm_id: ID of the selected LLM
         """
         logger.info(f"LLM selected: {llm_id}")
-        
+
         # Select the LLM in the session manager
         if self.session_manager.select_llm(llm_id):
             # Update the chat widget
             self.chat_widget.set_current_entity(llm_id, "llm")
+            # Refresh the thread list for this entity
+            self.refresh_thread_list()
             self.status_bar.showMessage(f"Connected to LLM: {llm_id}")
         else:
             self.status_bar.showMessage(f"Failed to connect to LLM: {llm_id}")
+
+    def on_thread_changed(self, index: int):
+        """
+        Handle thread selection change
+
+        Args:
+            index: Index of the selected thread
+        """
+        if index < 0:
+            return
+
+        thread_id = self.agent_selector.thread_selector.itemData(index)
+        if thread_id and self.session_manager.switch_thread(thread_id):
+            # Clear and reload chat
+            self.chat_widget.clear_chat()
+            self.chat_widget.load_chat_history()
+
+    def create_new_thread(self):
+        """
+        Create a new thread for the current entity
+        """
+        if not self.chat_widget.current_entity_id:
+            logger.warning("No entity selected")
+            return
+
+        thread_id = self.session_manager.create_thread(
+            self.chat_widget.current_entity_id,
+            self.chat_widget.current_entity_type
+        )
+        if thread_id:
+            # Switch to the new thread
+            if self.session_manager.switch_thread(thread_id):
+                # Refresh the thread list and load history
+                self.refresh_thread_list()
+                self.chat_widget.clear_chat()
+                self.chat_widget.load_chat_history()
+
+    def rename_current_thread(self):
+        """
+        Rename the current thread
+        """
+        current_thread = self.session_manager.get_current_thread()
+        if not current_thread:
+            logger.warning("No thread selected")
+            return
+
+        # Use styled input dialog
+        from agentcomm.ui.custom_dialogs import StyledInputDialog
+
+        new_title, ok = StyledInputDialog.get_text_input(
+            self,
+            "Rename Thread",
+            "Enter new thread name:",
+            current_thread.title
+        )
+
+        if ok and new_title.strip():
+            if self.session_manager.rename_thread(current_thread.thread_id, new_title.strip()):
+                self.refresh_thread_list()
+
+    def _thread_safe_refresh_thread_list(self):
+        """Thread-safe wrapper for refresh_thread_list"""
+        from PyQt6.QtCore import QMetaObject, Qt
+        QMetaObject.invokeMethod(
+            self, "refresh_thread_list",
+            Qt.ConnectionType.QueuedConnection
+        )
+
+    @pyqtSlot()
+    def refresh_thread_list(self):
+        """
+        Refresh the thread dropdown list in agent_selector
+        """
+        # Block signals to avoid triggering on_thread_changed
+        self.agent_selector.thread_selector.blockSignals(True)
+
+        # Save current selection
+        current_thread = self.session_manager.get_current_thread()
+        current_thread_id = current_thread.thread_id if current_thread else None
+
+        # Clear and repopulate the dropdown
+        self.agent_selector.thread_selector.clear()
+
+        # Get threads for the current entity
+        threads = self.session_manager.get_threads_for_entity()
+
+        # Add threads to dropdown
+        for thread in threads:
+            self.agent_selector.thread_selector.addItem(thread.title, thread.thread_id)
+
+        # Restore selection
+        if current_thread_id:
+            index = self.agent_selector.thread_selector.findData(current_thread_id)
+            if index >= 0:
+                self.agent_selector.thread_selector.setCurrentIndex(index)
+
+        # Re-enable signals
+        self.agent_selector.thread_selector.blockSignals(False)
+
+        # Update button states
+        has_threads = len(threads) > 0
+        self.agent_selector.rename_thread_btn.setEnabled(has_threads)
+        self.chat_widget.delete_thread_btn.setEnabled(has_threads and len(threads) > 1)
     
     def open_settings(self):
         """
@@ -341,18 +453,17 @@ class MainWindow(QMainWindow):
             self.agent_selector.llms_list.setObjectName("llms_list")
         if hasattr(self.agent_selector, 'refresh_agents_button'):
             self.agent_selector.refresh_agents_button.setObjectName("refresh_agents_button")
+        # Thread controls now in agent_selector
+        if hasattr(self.agent_selector, 'thread_selector'):
+            self.agent_selector.thread_selector.setObjectName("thread_selector")
+        if hasattr(self.agent_selector, 'new_thread_btn'):
+            self.agent_selector.new_thread_btn.setObjectName("new_thread_button")
+        if hasattr(self.agent_selector, 'rename_thread_btn'):
+            self.agent_selector.rename_thread_btn.setObjectName("rename_thread_button")
 
         # Chat widget components
-        if hasattr(self.chat_widget, 'thread_selector'):
-            self.chat_widget.thread_selector.setObjectName("thread_selector")
-        if hasattr(self.chat_widget, 'new_thread_btn'):
-            self.chat_widget.new_thread_btn.setObjectName("new_thread_button")
-        if hasattr(self.chat_widget, 'rename_thread_btn'):
-            self.chat_widget.rename_thread_btn.setObjectName("rename_thread_button")
         if hasattr(self.chat_widget, 'delete_thread_btn'):
             self.chat_widget.delete_thread_btn.setObjectName("delete_thread_button")
-        if hasattr(self.chat_widget, 'clear_chat_btn'):
-            self.chat_widget.clear_chat_btn.setObjectName("clear_chat_button")
         if hasattr(self.chat_widget, 'chat_scroll_area'):
             self.chat_widget.chat_scroll_area.setObjectName("chat_display")
         if hasattr(self.chat_widget, 'message_input'):

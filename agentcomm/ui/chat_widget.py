@@ -446,124 +446,11 @@ class ChatWidget(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
-        # Create thread selector header
-        self.thread_header = QHBoxLayout()
-        self.thread_header.setContentsMargins(10, 5, 10, 5)
-        self.thread_header.setSpacing(10)
-
-        # Thread selector label
-        thread_label = QLabel("Chats:")
-        thread_label.setStyleSheet("""
-            color: #9ca3af;
-            font-size: 12px;
-            font-weight: 600;
-        """)
-        self.thread_header.addWidget(thread_label)
-
-        # Thread dropdown
-        self.thread_selector = QComboBox()
-        self.thread_selector.setFixedWidth(200)
-        self.thread_selector.setStyleSheet("""
-            QComboBox {
-                background: #2a2a2a;
-                color: #e5e7eb;
-                border: 1px solid #3f3f46;
-                border-radius: 6px;
-                padding: 6px 10px;
-                padding-right: 25px;
-                font-size: 12px;
-            }
-            QComboBox:hover {
-                border: 1px solid #3b82f6;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
-                width: 20px;
-                border: none;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #9ca3af;
-                width: 0px;
-                height: 0px;
-                margin-right: 5px;
-            }
-            QComboBox::down-arrow:hover {
-                border-top: 5px solid #3b82f6;
-            }
-            QComboBox QAbstractItemView {
-                background: #2a2a2a;
-                color: #e5e7eb;
-                selection-background-color: #3b82f6;
-                border: 1px solid #3f3f46;
-                border-radius: 4px;
-            }
-        """)
-        self.thread_selector.currentIndexChanged.connect(self.on_thread_changed)
-        self.thread_header.addWidget(self.thread_selector)
-
-        # New thread button (icon only)
-        self.new_thread_btn = QPushButton("➕")
-        self.new_thread_btn.setFixedWidth(36)
-        self.new_thread_btn.setFixedHeight(36)
-        self.new_thread_btn.setToolTip("New chat")
-        self.new_thread_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.new_thread_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #6b7280;
-                border: none;
-                border-radius: 18px;
-                font-size: 16px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background: #3b82f6;
-                color: white;
-            }
-            QPushButton:pressed {
-                background: #2563eb;
-                color: white;
-            }
-        """)
-        self.new_thread_btn.clicked.connect(self.create_new_thread)
-        self.thread_header.addWidget(self.new_thread_btn)
-
-        # Rename thread button (icon only)
-        self.rename_thread_btn = QPushButton("✏️")
-        self.rename_thread_btn.setFixedWidth(36)
-        self.rename_thread_btn.setFixedHeight(36)
-        self.rename_thread_btn.setToolTip("Rename chat")
-        self.rename_thread_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.rename_thread_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #6b7280;
-                border: none;
-                border-radius: 18px;
-                font-size: 16px;
-                padding: 0px;
-            }
-            QPushButton:hover {
-                background: #52525b;
-                color: white;
-            }
-            QPushButton:pressed {
-                background: #3f3f46;
-                color: white;
-            }
-            QPushButton:disabled {
-                color: #4b5563;
-                background: transparent;
-            }
-        """)
-        self.rename_thread_btn.clicked.connect(self.rename_current_thread)
-        self.thread_header.addWidget(self.rename_thread_btn)
-
-        self.thread_header.addStretch()
+        # Create delete button header (top right)
+        self.delete_header = QHBoxLayout()
+        self.delete_header.setContentsMargins(10, 5, 10, 5)
+        self.delete_header.setSpacing(10)
+        self.delete_header.addStretch()
 
         # Delete thread button (trash icon in top right corner)
         self.delete_thread_btn = QPushButton("🗑")
@@ -594,9 +481,9 @@ class ChatWidget(QWidget):
             }
         """)
         self.delete_thread_btn.clicked.connect(self.delete_current_thread)
-        self.thread_header.addWidget(self.delete_thread_btn)
+        self.delete_header.addWidget(self.delete_thread_btn)
 
-        self.layout.addLayout(self.thread_header)
+        self.layout.addLayout(self.delete_header)
 
         # Create the chat display area
         self.chat_scroll_area = QScrollArea()
@@ -759,10 +646,9 @@ class ChatWidget(QWidget):
 
     def _thread_safe_thread_callback(self):
         """Thread-safe wrapper for thread change callback"""
-        QMetaObject.invokeMethod(
-            self, "refresh_thread_list",
-            Qt.ConnectionType.QueuedConnection
-        )
+        # Emit signal to notify that threads have changed
+        # Main window will handle the refresh
+        pass
 
     def set_current_entity(self, entity_id: str, entity_type: str):
         """
@@ -775,8 +661,8 @@ class ChatWidget(QWidget):
         self.current_entity_id = entity_id
         self.current_entity_type = entity_type
 
-        # Refresh thread list for the new entity
-        self.refresh_thread_list()
+        # Thread list will be refreshed by session manager's thread callback
+        # which is registered in main_window
 
         # Clear the chat display
         self.clear_chat()
