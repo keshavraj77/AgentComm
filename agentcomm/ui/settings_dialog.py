@@ -9,13 +9,13 @@ from typing import Optional, Dict, Any, List
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QLineEdit, QPushButton, QFormLayout, QComboBox,
-    QCheckBox, QSpinBox, QDoubleSpinBox, QGroupBox, QScrollArea,
-    QMessageBox
+    QCheckBox, QSpinBox, QDoubleSpinBox, QGroupBox, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 
 from agentcomm.agents.agent_registry import AgentRegistry, Agent, AgentAuthentication, AgentCapabilities
 from agentcomm.llm.llm_router import LLMRouter
+from agentcomm.ui.custom_dialogs import StyledMessageBox
 
 logger = logging.getLogger(__name__)
 
@@ -692,15 +692,15 @@ class SettingsDialog(QDialog):
         try:
             # Validate the form
             if not agent_id:
-                QMessageBox.warning(self, "Validation Error", "Agent ID is required")
+                StyledMessageBox.warning(self, "Validation Error", "Agent ID is required")
                 return
-            
+
             if not name:
-                QMessageBox.warning(self, "Validation Error", "Agent name is required")
+                StyledMessageBox.warning(self, "Validation Error", "Agent name is required")
                 return
-            
+
             if not url:
-                QMessageBox.warning(self, "Validation Error", "Agent URL is required")
+                StyledMessageBox.warning(self, "Validation Error", "Agent URL is required")
                 return
             
             # Create the agent
@@ -730,14 +730,14 @@ class SettingsDialog(QDialog):
             if self.agent_registry.add_agent(agent):
                 # Update the group box title
                 group_box.setTitle(name)
-                
-                QMessageBox.information(self, "Success", f"Agent {name} saved successfully")
+
+                StyledMessageBox.information(self, "Success", f"Agent {name} saved successfully")
             else:
-                QMessageBox.warning(self, "Error", f"Failed to save agent {name}")
-        
+                StyledMessageBox.warning(self, "Error", f"Failed to save agent {name}")
+
         except Exception as e:
             logger.error(f"Error saving agent: {e}")
-            QMessageBox.critical(self, "Error", f"Error saving agent: {e}")
+            StyledMessageBox.critical(self, "Error", f"Error saving agent: {e}")
     
     def remove_agent(self, group_box: QGroupBox, agent_id: str):
         """
@@ -749,27 +749,24 @@ class SettingsDialog(QDialog):
         """
         try:
             # Confirm the removal
-            result = QMessageBox.question(
+            if StyledMessageBox.question(
                 self,
                 "Confirm Removal",
-                f"Are you sure you want to remove agent {agent_id}?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            
-            if result == QMessageBox.StandardButton.Yes:
+                f"Are you sure you want to remove agent {agent_id}?"
+            ):
                 # Remove the agent from the registry
                 if self.agent_registry.remove_agent(agent_id):
                     # Remove the group box
                     self.agents_layout.removeWidget(group_box)
                     group_box.deleteLater()
-                    
-                    QMessageBox.information(self, "Success", f"Agent {agent_id} removed successfully")
+
+                    StyledMessageBox.information(self, "Success", f"Agent {agent_id} removed successfully")
                 else:
-                    QMessageBox.warning(self, "Error", f"Failed to remove agent {agent_id}")
-        
+                    StyledMessageBox.warning(self, "Error", f"Failed to remove agent {agent_id}")
+
         except Exception as e:
             logger.error(f"Error removing agent: {e}")
-            QMessageBox.critical(self, "Error", f"Error removing agent: {e}")
+            StyledMessageBox.critical(self, "Error", f"Error removing agent: {e}")
     
     def save_llm(self, llm_id: str, config: Dict[str, Any]):
         """
@@ -797,13 +794,13 @@ class SettingsDialog(QDialog):
             if config_store.save_config("llm"):
                 # Reload LLM router with new config
                 self.llm_router.reload_config()
-                QMessageBox.information(self, "Success", f"LLM {llm_id} configuration saved successfully")
+                StyledMessageBox.information(self, "Success", f"LLM {llm_id} configuration saved successfully")
             else:
-                QMessageBox.warning(self, "Error", f"Failed to save LLM {llm_id} configuration")
+                StyledMessageBox.warning(self, "Error", f"Failed to save LLM {llm_id} configuration")
 
         except Exception as e:
             logger.error(f"Error saving LLM configuration: {e}")
-            QMessageBox.critical(self, "Error", f"Error saving LLM configuration: {e}")
+            StyledMessageBox.critical(self, "Error", f"Error saving LLM configuration: {e}")
     
     def apply_settings(self):
         """
@@ -844,12 +841,12 @@ class SettingsDialog(QDialog):
             if config_store.save_config("llm"):
                 # Reload LLM router with new config
                 self.llm_router.reload_config()
-                QMessageBox.information(self, "Success", "All settings applied successfully")
+                StyledMessageBox.information(self, "Success", "All settings applied successfully")
             else:
-                QMessageBox.warning(self, "Error", "Failed to save settings")
+                StyledMessageBox.warning(self, "Error", "Failed to save settings")
 
         except Exception as e:
             logger.error(f"Error applying settings: {e}")
-            QMessageBox.critical(self, "Error", f"Error applying settings: {e}")
+            StyledMessageBox.critical(self, "Error", f"Error applying settings: {e}")
 
 

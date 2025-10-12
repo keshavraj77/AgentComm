@@ -102,36 +102,6 @@ class MainWindow(QMainWindow):
                 color: #ffffff;
                 font-size: 12px;
             }
-            QMessageBox {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #2d3748, stop:1 #1e293b);
-                color: #ffffff;
-                border: 2px solid #667eea;
-                border-radius: 10px;
-            }
-            QMessageBox QLabel {
-                color: #ffffff;
-                font-size: 14px;
-                padding: 10px;
-            }
-            QMessageBox QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-            }
-            QMessageBox QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #764ba2, stop:1 #667eea);
-            }
-            QMessageBox QPushButton:pressed {
-                background: #5a67d8;
-            }
         """)
 
         # Create the central widget
@@ -311,12 +281,12 @@ class MainWindow(QMainWindow):
         """
         Show the about dialog
         """
-        from PyQt6.QtWidgets import QMessageBox
+        from agentcomm.ui.custom_dialogs import StyledMessageBox
 
-        QMessageBox.about(
+        StyledMessageBox.information(
             self,
-            "About A2A Client",
-            "A2A Client with Base LLM Integration\n\n"
+            "About AgentComm",
+            "AgentComm - A2A Client with Multi-LLM Integration\n\n"
             "A Python-based application designed to interact with A2A "
             "(Agent-to-Agent) protocol-compliant agents while also providing "
             "direct access to various Large Language Models (LLMs)."

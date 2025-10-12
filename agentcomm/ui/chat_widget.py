@@ -683,17 +683,13 @@ class ChatWidget(QWidget):
         Reset the current thread by clearing all messages
         """
         # Confirm with the user before resetting
-        from PyQt6.QtWidgets import QMessageBox
+        from agentcomm.ui.custom_dialogs import StyledMessageBox
 
-        reply = QMessageBox.question(
+        if StyledMessageBox.question(
             self,
             "Clear Chat",
-            "Are you sure you want to clear this chat? All messages will be deleted.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
+            "Are you sure you want to clear this chat? All messages will be deleted."
+        ):
             # Reset the chat history in the session manager
             if self.session_manager.reset_current_thread():
                 # Clear the UI
@@ -855,8 +851,8 @@ class ChatWidget(QWidget):
         # Get thread count
         threads = self.session_manager.get_threads_for_entity()
         if len(threads) <= 1:
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(
+            from agentcomm.ui.custom_dialogs import StyledMessageBox
+            StyledMessageBox.warning(
                 self,
                 "Cannot Delete",
                 "Cannot delete the last thread. At least one thread must exist."
@@ -864,16 +860,13 @@ class ChatWidget(QWidget):
             return
 
         # Confirm deletion
-        from PyQt6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
+        from agentcomm.ui.custom_dialogs import StyledMessageBox
+
+        if StyledMessageBox.question(
             self,
             "Delete Thread",
-            f"Are you sure you want to delete thread '{current_thread.title}'? This action cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
+            f"Are you sure you want to delete thread '{current_thread.title}'? This action cannot be undone."
+        ):
             if self.session_manager.delete_thread(current_thread.thread_id):
                 # Thread list will be refreshed by callback
                 # Load the new current thread
