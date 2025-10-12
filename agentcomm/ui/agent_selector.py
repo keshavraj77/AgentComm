@@ -45,11 +45,10 @@ class AgentSelector(QWidget):
         self.agent_registry = agent_registry
         self.llm_router = llm_router
 
-        # Set modern styling for the sidebar
+        # Set minimalist styling for the sidebar
         self.setStyleSheet("""
             QWidget {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #1e293b, stop:1 #0f172a);
+                background: #212121;
             }
         """)
 
@@ -62,21 +61,20 @@ class AgentSelector(QWidget):
         self.agents_group = QGroupBox("Agents")
         self.agents_group.setStyleSheet("""
             QGroupBox {
-                color: #ffffff;
-                font-size: 16px;
-                font-weight: bold;
-                border: 2px solid #4a5568;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
+                color: #e5e7eb;
+                font-size: 14px;
+                font-weight: 600;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                margin-top: 8px;
+                padding-top: 12px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 5px 10px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
-                border-radius: 5px;
+                padding: 4px 8px;
+                background: transparent;
+                color: #9ca3af;
             }
         """)
         self.agents_layout = QVBoxLayout(self.agents_group)
@@ -85,24 +83,24 @@ class AgentSelector(QWidget):
         self.agents_list = QListWidget()
         self.agents_list.setStyleSheet("""
             QListWidget {
-                background: #2d3748;
-                color: #ffffff;
+                background: #2a2a2a;
+                color: #e5e7eb;
                 border: none;
-                border-radius: 8px;
-                padding: 5px;
-                font-size: 14px;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 13px;
             }
             QListWidget::item {
-                padding: 8px;
-                border-radius: 5px;
-                margin: 2px;
+                padding: 10px 8px;
+                border-radius: 4px;
+                margin: 2px 0px;
             }
             QListWidget::item:hover {
-                background: #4a5568;
+                background: #3f3f46;
             }
             QListWidget::item:selected {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
+                background: #3b82f6;
+                color: white;
             }
         """)
         self.agents_list.itemClicked.connect(self.on_agent_clicked)
@@ -112,21 +110,19 @@ class AgentSelector(QWidget):
         self.refresh_agents_button = QPushButton("Refresh Agents")
         self.refresh_agents_button.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
-                color: white;
+                background: #3f3f46;
+                color: #e5e7eb;
                 border: none;
-                border-radius: 8px;
-                padding: 10px;
-                font-size: 13px;
-                font-weight: bold;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 12px;
+                font-weight: 600;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #764ba2, stop:1 #667eea);
+                background: #52525b;
             }
             QPushButton:pressed {
-                background: #5a67d8;
+                background: #3b82f6;
             }
         """)
         self.refresh_agents_button.clicked.connect(self.refresh_agents)
@@ -138,21 +134,20 @@ class AgentSelector(QWidget):
         self.llms_group = QGroupBox("LLMs")
         self.llms_group.setStyleSheet("""
             QGroupBox {
-                color: #ffffff;
-                font-size: 16px;
-                font-weight: bold;
-                border: 2px solid #4a5568;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 15px;
+                color: #e5e7eb;
+                font-size: 14px;
+                font-weight: 600;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                margin-top: 8px;
+                padding-top: 12px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                padding: 5px 10px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #f093fb, stop:1 #f5576c);
-                border-radius: 5px;
+                padding: 4px 8px;
+                background: transparent;
+                color: #9ca3af;
             }
         """)
         self.llms_layout = QVBoxLayout(self.llms_group)
@@ -161,24 +156,24 @@ class AgentSelector(QWidget):
         self.llms_list = QListWidget()
         self.llms_list.setStyleSheet("""
             QListWidget {
-                background: #2d3748;
-                color: #ffffff;
+                background: #2a2a2a;
+                color: #e5e7eb;
                 border: none;
-                border-radius: 8px;
-                padding: 5px;
-                font-size: 14px;
+                border-radius: 6px;
+                padding: 4px;
+                font-size: 13px;
             }
             QListWidget::item {
-                padding: 8px;
-                border-radius: 5px;
-                margin: 2px;
+                padding: 10px 8px;
+                border-radius: 4px;
+                margin: 2px 0px;
             }
             QListWidget::item:hover {
-                background: #4a5568;
+                background: #3f3f46;
             }
             QListWidget::item:selected {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #f093fb, stop:1 #f5576c);
+                background: #10b981;
+                color: white;
             }
         """)
         self.llms_list.itemClicked.connect(self.on_llm_clicked)

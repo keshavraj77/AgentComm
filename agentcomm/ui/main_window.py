@@ -60,47 +60,46 @@ class MainWindow(QMainWindow):
         if logo_path.exists():
             self.setWindowIcon(QIcon(str(logo_path)))
 
-        # Apply modern dark theme to main window
+        # Apply minimalist dark theme to main window
         self.setStyleSheet("""
             QMainWindow {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #0f172a, stop:1 #1e293b);
+                background: #1a1a1a;
             }
             QMenuBar {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #1e293b, stop:1 #0f172a);
-                color: #ffffff;
-                padding: 5px;
-                font-size: 13px;
+                background: #212121;
+                color: #e5e7eb;
+                padding: 4px;
+                font-size: 12px;
+                border-bottom: 1px solid #3f3f46;
             }
             QMenuBar::item {
                 background: transparent;
-                padding: 8px 15px;
-                border-radius: 5px;
+                padding: 6px 12px;
+                border-radius: 4px;
             }
             QMenuBar::item:selected {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
+                background: #3f3f46;
             }
             QMenu {
-                background: #2d3748;
-                color: #ffffff;
-                border: 2px solid #4a5568;
-                border-radius: 8px;
-                padding: 5px;
+                background: #2a2a2a;
+                color: #e5e7eb;
+                border: 1px solid #3f3f46;
+                border-radius: 6px;
+                padding: 4px;
             }
             QMenu::item {
-                padding: 8px 30px;
-                border-radius: 5px;
+                padding: 8px 24px;
+                border-radius: 4px;
             }
             QMenu::item:selected {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #667eea, stop:1 #764ba2);
+                background: #3b82f6;
+                color: white;
             }
             QStatusBar {
-                background: #1e293b;
-                color: #ffffff;
-                font-size: 12px;
+                background: #212121;
+                color: #9ca3af;
+                font-size: 11px;
+                border-top: 1px solid #3f3f46;
             }
         """)
 

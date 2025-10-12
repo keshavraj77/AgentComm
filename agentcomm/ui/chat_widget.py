@@ -73,11 +73,11 @@ class MessageWidget(QFrame):
     """
     Widget for displaying a single message in the chat
     """
-    
+
     def __init__(self, message: str, sender: str, is_user: bool = False, parent: Optional[QWidget] = None):
         """
         Initialize the message widget
-        
+
         Args:
             message: Message text
             sender: Sender name
@@ -85,68 +85,121 @@ class MessageWidget(QFrame):
             parent: Parent widget
         """
         super().__init__(parent)
-        
+
         # Set up the frame
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setFrameShadow(QFrame.Shadow.Raised)
-        self.setLineWidth(1)
-        
-        # Set modern gradient background based on the sender
+        self.setFrameShape(QFrame.Shape.NoFrame)
+
+        # Allow widget to shrink to content size
+        from PyQt6.QtWidgets import QSizePolicy
+        if is_user:
+            self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+
+        # Set minimalist background based on the sender
         if is_user:
             self.setStyleSheet("""
                 QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 #667eea, stop:1 #764ba2);
-                    border-radius: 15px;
-                    padding: 5px;
+                    background: #374151;
+                    border-radius: 16px;
+                    padding: 0px;
+                    border: none;
+                }
+                QLabel {
+                    background: transparent;
+                    border-radius: 16px;
                 }
             """)
         else:
             self.setStyleSheet("""
                 QFrame {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 #f093fb, stop:1 #f5576c);
-                    border-radius: 15px;
-                    padding: 5px;
+                    background: transparent;
+                    border-radius: 18px;
+                    padding: 0px;
+                    border: none;
                 }
             """)
-        
+
         # Create the layout
         layout = QVBoxLayout(self)
-        
-        # Create the sender label
-        sender_label = QLabel(sender)
-        sender_label.setStyleSheet("""
-            font-weight: bold;
-            color: #ffffff;
-            font-size: 13px;
-            background: transparent;
-            padding: 2px 5px;
-        """)
-        layout.addWidget(sender_label)
+        # Minimal spacing between sender name and message
+        layout.setSpacing(3)
+        # Tighter padding for more compact messages
+        if is_user:
+            layout.setContentsMargins(12, 8, 12, 8)
+        else:
+            # AI messages: reduce top padding since we have the sender label
+            layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create the message text edit
-        message_text = QTextEdit()
-        message_text.setReadOnly(True)
-        message_text.setPlainText(message)
-        message_text.setFrameStyle(QFrame.Shape.NoFrame)
-        message_text.setStyleSheet("""
-            background-color: transparent;
-            color: #ffffff;
-            font-size: 14px;
-            padding: 5px;
-            border: none;
-        """)
-        message_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        message_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Only show sender label for AI messages (not for user)
+        if not is_user:
+            sender_label = QLabel(sender)
+            sender_label.setStyleSheet("""
+                font-weight: 600;
+                color: #9ca3af;
+                font-size: 11px;
+                background: transparent;
+                padding: 0px;
+                margin: 0px;
+            """)
+            sender_label.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(sender_label)
 
-        # Set the height based on the content
-        doc_height = message_text.document().size().height()
-        message_text.setFixedHeight(min(400, max(30, int(doc_height) + 10)))
+        # Use QLabel for user messages (tighter fit), QTextEdit for AI messages (for streaming)
+        if is_user:
+            # QLabel for compact, tight-fitting user messages
+            message_label = QLabel(message)
+            message_label.setWordWrap(True)
+            message_label.setTextFormat(Qt.TextFormat.PlainText)
+            message_label.setStyleSheet("""
+                background-color: transparent;
+                color: #e5e7eb;
+                font-size: 14px;
+                padding: 0px;
+                border: none;
+            """)
 
-        layout.addWidget(message_text)
-        layout.setSpacing(5)
-        layout.setContentsMargins(10, 8, 10, 8)
+            # Set maximum width for wrapping
+            message_label.setMaximumWidth(500)
+
+            layout.addWidget(message_label)
+        else:
+            # QTextEdit for AI messages (needed for streaming updates)
+            message_text = QTextEdit()
+            message_text.setReadOnly(True)
+            message_text.setPlainText(message)
+            message_text.setFrameStyle(QFrame.Shape.NoFrame)
+            message_text.setStyleSheet("""
+                background-color: transparent;
+                color: #e5e7eb;
+                font-size: 14px;
+                padding: 0px;
+                margin: 0px;
+                border: none;
+            """)
+            message_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            message_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+            # Remove ALL margins and padding for tighter fit
+            doc = message_text.document()
+            doc.setDocumentMargin(0)
+            message_text.setContentsMargins(0, 0, 0, 0)
+            message_text.setViewportMargins(0, 0, 0, 0)
+
+            # Align text to top
+            from PyQt6.QtGui import QTextOption
+            message_text.document().setDefaultTextOption(QTextOption(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop))
+
+            # Set width for proper text wrapping calculation
+            message_text.setMaximumWidth(700)
+            doc.setTextWidth(700)
+
+            # Calculate height based on content - must be done after setting width
+            doc_height = doc.size().height()
+            # Add small buffer for proper display, no maximum limit
+            calculated_height = int(doc_height) + 5
+            message_text.setMinimumHeight(calculated_height)
+            message_text.setMaximumHeight(calculated_height)
+
+            layout.addWidget(message_text, 0, Qt.AlignmentFlag.AlignTop)
 
 
 class ChatWidget(QWidget):
@@ -190,9 +243,9 @@ class ChatWidget(QWidget):
         # Thread selector label
         thread_label = QLabel("Thread:")
         thread_label.setStyleSheet("""
-            color: #ffffff;
-            font-size: 13px;
-            font-weight: bold;
+            color: #9ca3af;
+            font-size: 12px;
+            font-weight: 600;
         """)
         self.thread_header.addWidget(thread_label)
 
@@ -201,26 +254,25 @@ class ChatWidget(QWidget):
         self.thread_selector.setFixedWidth(200)
         self.thread_selector.setStyleSheet("""
             QComboBox {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2d3748, stop:1 #1a202c);
-                color: #ffffff;
-                border: 2px solid #4a5568;
-                border-radius: 8px;
-                padding: 5px 10px;
-                font-size: 13px;
+                background: #2a2a2a;
+                color: #e5e7eb;
+                border: 1px solid #3f3f46;
+                border-radius: 6px;
+                padding: 6px 10px;
+                font-size: 12px;
             }
             QComboBox:hover {
-                border: 2px solid #667eea;
+                border: 1px solid #3b82f6;
             }
             QComboBox::drop-down {
                 border: none;
             }
             QComboBox QAbstractItemView {
-                background: #2d3748;
-                color: #ffffff;
-                selection-background-color: #667eea;
-                border: 2px solid #4a5568;
-                border-radius: 5px;
+                background: #2a2a2a;
+                color: #e5e7eb;
+                selection-background-color: #3b82f6;
+                border: 1px solid #3f3f46;
+                border-radius: 4px;
             }
         """)
         self.thread_selector.currentIndexChanged.connect(self.on_thread_changed)
@@ -231,18 +283,16 @@ class ChatWidget(QWidget):
         self.new_thread_btn.setFixedWidth(60)
         self.new_thread_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #667eea, stop:1 #764ba2);
+                background: #3b82f6;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 6px 8px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #764ba2, stop:1 #667eea);
+                background: #2563eb;
             }
         """)
         self.new_thread_btn.clicked.connect(self.create_new_thread)
@@ -253,18 +303,16 @@ class ChatWidget(QWidget):
         self.rename_thread_btn.setFixedWidth(70)
         self.rename_thread_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #667eea, stop:1 #764ba2);
-                color: white;
+                background: #3f3f46;
+                color: #e5e7eb;
                 border: none;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 6px 8px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #764ba2, stop:1 #667eea);
+                background: #52525b;
             }
         """)
         self.rename_thread_btn.clicked.connect(self.rename_current_thread)
@@ -275,40 +323,36 @@ class ChatWidget(QWidget):
         self.delete_thread_btn.setFixedWidth(70)
         self.delete_thread_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f093fb, stop:1 #f5576c);
-                color: white;
+                background: #3f3f46;
+                color: #e5e7eb;
                 border: none;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 6px 8px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f5576c, stop:1 #f093fb);
+                background: #ef4444;
             }
         """)
         self.delete_thread_btn.clicked.connect(self.delete_current_thread)
         self.thread_header.addWidget(self.delete_thread_btn)
 
         # Clear chat button
-        self.clear_chat_btn = QPushButton("Clear Chat")
-        self.clear_chat_btn.setFixedWidth(90)
+        self.clear_chat_btn = QPushButton("Clear")
+        self.clear_chat_btn.setFixedWidth(60)
         self.clear_chat_btn.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f093fb, stop:1 #f5576c);
-                color: white;
+                background: #3f3f46;
+                color: #e5e7eb;
                 border: none;
-                border-radius: 8px;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 6px 8px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f5576c, stop:1 #f093fb);
+                background: #ef4444;
             }
         """)
         self.clear_chat_btn.clicked.connect(self.reset_thread)
@@ -325,30 +369,29 @@ class ChatWidget(QWidget):
         self.chat_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.chat_scroll_area.setStyleSheet("""
             QScrollArea {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #1a202c, stop:1 #2d3748);
+                background: #1a1a1a;
                 border: none;
             }
             QScrollBar:vertical {
-                background: #2d3748;
-                width: 10px;
-                border-radius: 5px;
+                background: #2a2a2a;
+                width: 8px;
+                border-radius: 4px;
             }
             QScrollBar::handle:vertical {
-                background: #667eea;
-                border-radius: 5px;
+                background: #4b5563;
+                border-radius: 4px;
                 min-height: 20px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #764ba2;
+                background: #6b7280;
             }
         """)
 
         self.chat_container = QWidget()
         self.chat_layout = QVBoxLayout(self.chat_container)
         self.chat_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.chat_layout.setSpacing(8)
-        self.chat_layout.setContentsMargins(5, 5, 5, 5)
+        self.chat_layout.setSpacing(4)
+        self.chat_layout.setContentsMargins(16, 10, 16, 10)
 
         self.chat_scroll_area.setWidget(self.chat_container)
         self.layout.addWidget(self.chat_scroll_area, 1)
@@ -361,44 +404,40 @@ class ChatWidget(QWidget):
         self.message_input = QTextEdit()
         self.message_input.setPlaceholderText("Type your message here...")
         self.message_input.setAcceptRichText(False)
-        self.message_input.setFixedHeight(80)
+        self.message_input.setFixedHeight(50)
         self.message_input.setStyleSheet("""
             QTextEdit {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #2d3748, stop:1 #1a202c);
-                color: #ffffff;
-                border: 2px solid #4a5568;
-                border-radius: 12px;
-                padding: 10px;
+                background: #2a2a2a;
+                color: #e5e7eb;
+                border: 1px solid #3f3f46;
+                border-radius: 8px;
+                padding: 12px;
                 font-size: 14px;
             }
             QTextEdit:focus {
-                border: 2px solid #667eea;
+                border: 1px solid #3b82f6;
             }
         """)
         self.input_layout.addWidget(self.message_input, 1)
 
         self.send_button = QPushButton("Send")
-        self.send_button.setFixedWidth(100)
-        self.send_button.setFixedHeight(80)
+        self.send_button.setFixedWidth(80)
+        self.send_button.setFixedHeight(50)
         self.send_button.setStyleSheet("""
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #667eea, stop:1 #764ba2);
+                background: #3b82f6;
                 color: white;
                 border: none;
-                border-radius: 12px;
-                font-size: 16px;
-                font-weight: bold;
-                padding: 10px;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 12px;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #764ba2, stop:1 #667eea);
+                background: #2563eb;
             }
             QPushButton:pressed {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #5a67d8, stop:1 #6b46c1);
+                background: #1d4ed8;
             }
         """)
         self.send_button.clicked.connect(self.send_message)
@@ -507,15 +546,38 @@ class ChatWidget(QWidget):
     def add_message_widget(self, message: str, sender: str, is_user: bool = False):
         """
         Add a message widget to the chat display
-        
+
         Args:
             message: Message text
             sender: Sender name
             is_user: Whether the message is from the user
         """
+        # Create a container widget for alignment
+        container = QWidget()
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Create the message widget
         message_widget = MessageWidget(message, sender, is_user)
-        self.chat_layout.addWidget(message_widget)
-        
+
+        # Set max width for better readability
+        # User messages: no max width, let them shrink to content
+        # AI messages: limit width for readability
+        if not is_user:
+            message_widget.setMaximumWidth(700)
+
+        if is_user:
+            # User messages: add spacer on left, message on right
+            container_layout.addStretch()
+            container_layout.addWidget(message_widget)
+        else:
+            # AI messages: message on left, spacer on right
+            container_layout.addWidget(message_widget)
+            container_layout.addStretch()
+
+        self.chat_layout.addWidget(container)
+
         # Scroll to the bottom
         self.chat_scroll_area.verticalScrollBar().setValue(
             self.chat_scroll_area.verticalScrollBar().maximum()
@@ -594,21 +656,34 @@ class ChatWidget(QWidget):
         Finalize the streaming message by updating with final content and removing streaming flag
         """
         logger.debug(f"Finalizing streaming message. Total length: {len(self.streaming_response)}")
-        for i in range(self.chat_layout.count()):
-            widget = self.chat_layout.itemAt(i).widget()
-            if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
-                # Update the widget with the final streaming response
-                message_text = widget.findChild(QTextEdit)
-                if message_text and self.streaming_response:
-                    message_text.setPlainText(self.streaming_response)
-                    # Update the height
-                    doc_height = message_text.document().size().height()
-                    message_text.setFixedHeight(min(400, max(30, int(doc_height) + 10)))
-                    logger.debug(f"Updated streaming widget with final text: {self.streaming_response[:50]}...")
 
-                # Mark as no longer streaming (don't delete the attribute)
-                widget.is_streaming = False
-                break
+        for i in range(self.chat_layout.count()):
+            container = self.chat_layout.itemAt(i).widget()
+            if not container:
+                continue
+
+            # Look for MessageWidget inside the container
+            for j in range(container.layout().count() if container.layout() else 0):
+                item = container.layout().itemAt(j)
+                if item and item.widget():
+                    widget = item.widget()
+                    if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
+                        # Update the widget with the final streaming response
+                        message_text = widget.findChild(QTextEdit)
+                        if message_text and self.streaming_response:
+                            message_text.setPlainText(self.streaming_response)
+                            # Update the height - ensure full content is visible
+                            doc = message_text.document()
+                            doc.setTextWidth(700)
+                            doc_height = doc.size().height()
+                            calculated_height = int(doc_height) + 5
+                            message_text.setMinimumHeight(calculated_height)
+                            message_text.setMaximumHeight(calculated_height)
+                            logger.debug(f"Updated streaming widget with final text: {self.streaming_response[:50]}...")
+
+                        # Mark as no longer streaming (don't delete the attribute)
+                        widget.is_streaming = False
+                        return
     
     
     @pyqtSlot(str, str, str)
@@ -631,10 +706,22 @@ class ChatWidget(QWidget):
             # The streaming response is already being displayed via update_streaming_message
             # We don't need to add a duplicate message
             streaming_widget = None
+
             for i in range(self.chat_layout.count()):
-                widget = self.chat_layout.itemAt(i).widget()
-                if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
-                    streaming_widget = widget
+                container = self.chat_layout.itemAt(i).widget()
+                if not container:
+                    continue
+
+                # Look for MessageWidget inside the container
+                for j in range(container.layout().count() if container.layout() else 0):
+                    item = container.layout().itemAt(j)
+                    if item and item.widget():
+                        widget = item.widget()
+                        if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
+                            streaming_widget = widget
+                            break
+
+                if streaming_widget:
                     break
 
             if streaming_widget:
@@ -706,26 +793,46 @@ class ChatWidget(QWidget):
             return
 
         # Check if there's already a streaming message widget
+        # We need to search through containers now
         streaming_widget = None
+        streaming_container = None
         streaming_count = 0
+
         for i in range(self.chat_layout.count()):
-            widget = self.chat_layout.itemAt(i).widget()
-            if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
-                streaming_count += 1
-                if not streaming_widget:
-                    streaming_widget = widget
+            container = self.chat_layout.itemAt(i).widget()
+            if not container:
+                continue
+
+            # Look for MessageWidget inside the container
+            for j in range(container.layout().count() if container.layout() else 0):
+                item = container.layout().itemAt(j)
+                if item and item.widget():
+                    widget = item.widget()
+                    if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
+                        streaming_count += 1
+                        if not streaming_widget:
+                            streaming_widget = widget
+                            streaming_container = container
 
         # Debug: log if multiple streaming widgets found
         if streaming_count > 1:
             logger.warning(f"Found {streaming_count} streaming widgets! Removing duplicates...")
             # Remove duplicate streaming widgets
             for i in range(self.chat_layout.count() - 1, -1, -1):
-                widget = self.chat_layout.itemAt(i).widget()
-                if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
-                    if widget != streaming_widget:
-                        logger.warning(f"Removing duplicate streaming widget at position {i}")
-                        self.chat_layout.removeWidget(widget)
-                        widget.deleteLater()
+                container = self.chat_layout.itemAt(i).widget()
+                if not container:
+                    continue
+
+                for j in range(container.layout().count() if container.layout() else 0):
+                    item = container.layout().itemAt(j)
+                    if item and item.widget():
+                        widget = item.widget()
+                        if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
+                            if widget != streaming_widget:
+                                logger.warning(f"Removing duplicate streaming container at position {i}")
+                                self.chat_layout.removeWidget(container)
+                                container.deleteLater()
+                                break
 
         if streaming_widget:
             # Update the existing widget
@@ -733,15 +840,33 @@ class ChatWidget(QWidget):
             if message_text:
                 message_text.setPlainText(self.streaming_response)
 
-                # Update the height
-                doc_height = message_text.document().size().height()
-                message_text.setFixedHeight(min(200, max(50, int(doc_height) + 20)))
+                # Update the height - ensure full content is visible
+                doc = message_text.document()
+                doc.setTextWidth(700)
+                doc_height = doc.size().height()
+                calculated_height = int(doc_height) + 5
+                message_text.setMinimumHeight(calculated_height)
+                message_text.setMaximumHeight(calculated_height)
         else:
-            # Create a new widget
+            # Create a new widget with container
             logger.debug(f"Creating new streaming widget for entity: {self.current_entity_id}")
-            streaming_widget = MessageWidget(self.streaming_response, self.current_entity_id or "Assistant")
+
+            # Create container for alignment
+            container = QWidget()
+            container_layout = QHBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(0)
+
+            # Create message widget
+            streaming_widget = MessageWidget(self.streaming_response, self.current_entity_id or "Assistant", is_user=False)
             streaming_widget.is_streaming = True
-            self.chat_layout.addWidget(streaming_widget)
+            streaming_widget.setMaximumWidth(700)
+
+            # AI message - left aligned
+            container_layout.addWidget(streaming_widget)
+            container_layout.addStretch()
+
+            self.chat_layout.addWidget(container)
 
         # Scroll to the bottom
         self.chat_scroll_area.verticalScrollBar().setValue(
