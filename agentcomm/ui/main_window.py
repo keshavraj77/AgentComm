@@ -102,6 +102,36 @@ class MainWindow(QMainWindow):
                 color: #ffffff;
                 font-size: 12px;
             }
+            QMessageBox {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #2d3748, stop:1 #1e293b);
+                color: #ffffff;
+                border: 2px solid #667eea;
+                border-radius: 10px;
+            }
+            QMessageBox QLabel {
+                color: #ffffff;
+                font-size: 14px;
+                padding: 10px;
+            }
+            QMessageBox QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 80px;
+            }
+            QMessageBox QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #764ba2, stop:1 #667eea);
+            }
+            QMessageBox QPushButton:pressed {
+                background: #5a67d8;
+            }
         """)
 
         # Create the central widget
