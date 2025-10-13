@@ -183,6 +183,16 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        # Add settings action to File menu for macOS
+        import platform
+        is_mac = platform.system() == 'Darwin'
+        if is_mac:
+            settings_action = QAction("Settings", self)
+            settings_action.setStatusTip("Open settings")
+            settings_action.triggered.connect(self.open_settings)
+            file_menu.addAction(settings_action)
+            file_menu.addSeparator()
+
         exit_action = QAction("E&xit", self)
         exit_action.setStatusTip("Exit the application")
         exit_action.triggered.connect(self.close)
@@ -210,19 +220,92 @@ class MainWindow(QMainWindow):
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         menu_bar.setCornerWidget(spacer, Qt.Corner.TopLeftCorner)
 
-        # Add settings icon button on the right side
-        self.settings_action = QAction("⚙", self)
-        self.settings_action.setObjectName("settings_action")
-        self.settings_action.setStatusTip("Open settings")
-        self.settings_action.triggered.connect(self.open_settings)
+        # Add settings icon button on the right side (only for non-macOS platforms)
+        if not is_mac:
+            self.settings_action = QAction("⚙", self)
+            self.settings_action.setObjectName("settings_action")
+            self.settings_action.setStatusTip("Open settings")
+            self.settings_action.triggered.connect(self.open_settings)
 
-        # Create a widget to hold the settings button
-        settings_widget = QWidget()
-        settings_layout = QHBoxLayout(settings_widget)
-        settings_layout.setContentsMargins(8, 0, 8, 0)
-        settings_layout.setSpacing(0)
+            # Create a widget to hold the settings button
+            settings_widget = QWidget()
+            settings_layout = QHBoxLayout(settings_widget)
+            settings_layout.setContentsMargins(8, 0, 8, 0)
+            settings_layout.setSpacing(0)
 
-        from PyQt6.QtWidgets import QPushButton
+            from PyQt6.QtWidgets import QPushButton
+            settings_btn = QPushButton("⚙")
+            settings_btn.setFixedSize(32, 32)
+            settings_btn.setToolTip("Settings")
+            settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            settings_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    color: #9ca3af;
+                    border: none;
+                    border-radius: 6px;
+                    font-size: 18px;
+                    padding: 0px;
+                }
+                QPushButton:hover {
+                    background: #3f3f46;
+                    color: #3b82f6;
+                }
+                QPushButton:pressed {
+                    background: #3b82f6;
+                    color: white;
+                }
+            """)
+            settings_btn.clicked.connect(self.open_settings)
+            settings_layout.addWidget(settings_btn)
+
+            menu_bar.setCornerWidget(settings_widget, Qt.Corner.TopRightCorner)
+        
+        # Create a custom toolbar with settings button for macOS compatibility
+        if is_mac:  # macOS
+            self.create_toolbar_with_settings()
+            
+    def create_toolbar(self):
+        """
+        Create the toolbar
+        """
+        # Toolbar removed - settings button now in menu bar corner
+        pass
+        
+    def create_toolbar_with_settings(self):
+        """
+        Create a custom toolbar with settings button for macOS compatibility
+        """
+        from PyQt6.QtWidgets import QToolBar, QWidget, QHBoxLayout, QPushButton, QSizePolicy
+        
+        # Create a toolbar that will be placed at the top
+        toolbar = QToolBar("Settings Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setFloatable(False)
+        toolbar.setObjectName("settings_toolbar")
+        
+        # Set toolbar style
+        toolbar.setStyleSheet("""
+            QToolBar {
+                background: #212121;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+            }
+        """)
+        
+        # Create a container widget to hold the settings button
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(0)
+        
+        # Add a spacer to push the button to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout.addWidget(spacer)
+        
+        # Create the settings button
         settings_btn = QPushButton("⚙")
         settings_btn.setFixedSize(32, 32)
         settings_btn.setToolTip("Settings")
@@ -246,16 +329,13 @@ class MainWindow(QMainWindow):
             }
         """)
         settings_btn.clicked.connect(self.open_settings)
-        settings_layout.addWidget(settings_btn)
-
-        menu_bar.setCornerWidget(settings_widget, Qt.Corner.TopRightCorner)
+        layout.addWidget(settings_btn)
         
-    def create_toolbar(self):
-        """
-        Create the toolbar
-        """
-        # Toolbar removed - settings button now in menu bar corner
-        pass
+        # Add the container to the toolbar
+        toolbar.addWidget(container)
+        
+        # Add the toolbar to the main window
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, toolbar)
         
     def connect_signals(self):
         """
@@ -330,8 +410,8 @@ class MainWindow(QMainWindow):
         """
         Create a new thread for the current entity
         """
-        if not self.chat_widget.current_entity_id:
-            logger.warning("No entity selected")
+        if not self.chat_widget.current_entity_id or not self.chat_widget.current_entity_type:
+            logger.warning("No entity selected or entity type not set")
             return
 
         thread_id = self.session_manager.create_thread(
