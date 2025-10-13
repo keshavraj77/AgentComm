@@ -4,7 +4,7 @@ Settings Dialog for A2A Client
 """
 
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
@@ -263,7 +263,8 @@ class SettingsDialog(QDialog):
         self.button_layout.addStretch()
         
         self.ok_button = QPushButton("OK")
-        self.ok_button.clicked.connect(self.accept)
+        self.ok_button.clicked.connect(self.apply_and_accept)
+        self.ok_button.setObjectName("ok_button")  # Add object name for easier identification
         self.button_layout.addWidget(self.ok_button)
         
         self.cancel_button = QPushButton("Cancel")
@@ -272,6 +273,7 @@ class SettingsDialog(QDialog):
         
         self.apply_button = QPushButton("Apply")
         self.apply_button.clicked.connect(self.apply_settings)
+        self.apply_button.setObjectName("apply_button")  # Add object name for easier identification
         self.button_layout.addWidget(self.apply_button)
         
         self.layout.addLayout(self.button_layout)
@@ -727,13 +729,16 @@ class SettingsDialog(QDialog):
             )
             
             # Add the agent to the registry
+            logger.info(f"Saving agent: {name} ({agent_id})")
             if self.agent_registry.add_agent(agent):
                 # Update the group box title
                 group_box.setTitle(name)
 
                 StyledMessageBox.information(self, "Success", f"Agent {name} saved successfully")
+                logger.info(f"Agent {name} ({agent_id}) saved successfully")
             else:
                 StyledMessageBox.warning(self, "Error", f"Failed to save agent {name}")
+                logger.error(f"Failed to save agent {name} ({agent_id})")
 
         except Exception as e:
             logger.error(f"Error saving agent: {e}")
@@ -802,14 +807,25 @@ class SettingsDialog(QDialog):
             logger.error(f"Error saving LLM configuration: {e}")
             StyledMessageBox.critical(self, "Error", f"Error saving LLM configuration: {e}")
     
+    def apply_and_accept(self):
+        """
+        Apply settings and accept the dialog
+        """
+        logger.info("OK button clicked - applying settings and closing dialog")
+        self.apply_settings()
+        self.accept()
+        
     def apply_settings(self):
         """
         Apply the settings
         """
+        logger.info("Apply button clicked - applying all settings")
         try:
             # Save all LLM configurations
             config_store = self.agent_registry.config_store
+            success = True
 
+            # Process LLM settings
             for llm_id, inputs in self.llm_inputs.items():
                 # Build config dict based on provider type
                 config = {}
@@ -837,16 +853,191 @@ class SettingsDialog(QDialog):
                 for key, value in config.items():
                     config_store.llm_config["providers"][llm_id][key] = value
 
-            # Save to file
-            if config_store.save_config("llm"):
+            # Save LLM settings to file
+            if not config_store.save_config("llm"):
+                success = False
+                logger.error("Failed to save LLM settings")
+            else:
                 # Reload LLM router with new config
                 self.llm_router.reload_config()
+
+            # Process agent settings - collect all agent data from the UI
+            # This ensures any unsaved agent changes are also applied
+            agents_to_save = []
+            
+            # Iterate through all agent form widgets in the agents container
+            for i in range(self.agents_layout.count()):
+                item = self.agents_layout.itemAt(i)
+                if item and item.widget() and isinstance(item.widget(), QGroupBox):
+                    group_box = item.widget()
+                    
+                    # Extract agent data from form fields
+                    agent_data = self._extract_agent_data_from_form(group_box)
+                    if agent_data and agent_data.get("id") and agent_data.get("name") and agent_data.get("url"):
+                        # Only save agents with required fields (id, name, url)
+                        agents_to_save.append(agent_data)
+                        logger.info(f"Collected agent data for: {agent_data.get('name')} ({agent_data.get('id')})")
+            
+            # Update the config store with all agent data
+            if agents_to_save:
+                # The agents_config is actually a list in practice, despite the type hint
+                config_store.agents_config = agents_to_save  # type: ignore
+                logger.info(f"Saving {len(agents_to_save)} agents to configuration")
+                if not config_store.save_config("agents"):
+                    success = False
+                    logger.error("Failed to save agent settings")
+                else:
+                    # Reload the agent registry to apply changes
+                    logger.info("Reloading agent registry after configuration save")
+                    self.agent_registry.load_agents()
+            else:
+                # If no valid agents were found in the UI, but there are agents in the config,
+                # we should still save an empty list to clear any invalid agents
+                if config_store.agents_config and len(config_store.agents_config) > 0:
+                    config_store.agents_config = []  # type: ignore
+                    if config_store.save_config("agents"):
+                        logger.info("Cleared invalid agents from configuration")
+                        self.agent_registry.load_agents()
+            
+            # Show appropriate message based on success
+            if success:
                 StyledMessageBox.information(self, "Success", "All settings applied successfully")
             else:
-                StyledMessageBox.warning(self, "Error", "Failed to save settings")
+                StyledMessageBox.warning(self, "Error", "Failed to save some settings")
 
         except Exception as e:
             logger.error(f"Error applying settings: {e}")
             StyledMessageBox.critical(self, "Error", f"Error applying settings: {e}")
-
-
+    
+    def _extract_agent_data_from_form(self, group_box: QGroupBox) -> Optional[Dict[str, Any]]:
+        """
+        Extract agent data from form fields in a group box
+        
+        Args:
+            group_box: Group box containing the agent form
+            
+        Returns:
+            Dictionary with agent data or None if extraction fails
+        """
+        try:
+            # Direct approach to find form fields by their types
+            agent_data = {
+                "capabilities": {},
+                "authentication": {},
+                "default_input_modes": ["text/plain"],
+                "default_output_modes": ["text/plain"],
+                "is_built_in": False
+            }
+            
+            # Find all input widgets in the group box
+            for child in group_box.findChildren(QLineEdit):
+                if child.objectName() == "id_input" or child.placeholderText() == "ID":
+                    agent_data["id"] = child.text().strip()
+                elif child.objectName() == "name_input" or child.placeholderText() == "Name":
+                    agent_data["name"] = child.text().strip()
+                elif child.objectName() == "description_input" or child.placeholderText() == "Description":
+                    agent_data["description"] = child.text().strip()
+                elif child.objectName() == "url_input" or child.placeholderText() == "URL":
+                    agent_data["url"] = child.text().strip()
+                elif child.objectName() == "api_key_name_input" or "api key" in child.placeholderText().lower():
+                    agent_data["authentication"]["api_key_name"] = child.text().strip()
+                elif child.objectName() == "token_input" or "token" in child.placeholderText().lower():
+                    agent_data["authentication"]["token"] = child.text().strip()
+            
+            # Find auth type combo box
+            for child in group_box.findChildren(QComboBox):
+                if child.objectName() == "auth_type_combo" or any("auth" in item.lower() for item in [child.itemText(i) for i in range(child.count())]):
+                    agent_data["authentication"]["auth_type"] = child.currentText()
+            
+            # Find checkboxes
+            for child in group_box.findChildren(QCheckBox):
+                if "streaming" in child.text().lower():
+                    agent_data["capabilities"]["streaming"] = child.isChecked()
+                elif "push" in child.text().lower():
+                    agent_data["capabilities"]["push_notifications"] = child.isChecked()
+                elif "file" in child.text().lower():
+                    agent_data["capabilities"]["file_upload"] = child.isChecked()
+                elif "tool" in child.text().lower():
+                    agent_data["capabilities"]["tool_use"] = child.isChecked()
+                elif "default" in child.text().lower():
+                    agent_data["is_default"] = child.isChecked()
+            
+            # Alternative approach: try to find form layout and extract fields
+            if not agent_data.get("id") or not agent_data.get("name") or not agent_data.get("url"):
+                # Find form layout
+                form_layout = None
+                for layout in group_box.findChildren(QFormLayout):
+                    form_layout = layout
+                    break
+                
+                if form_layout:
+                    # Process each row in the form
+                    for row in range(form_layout.rowCount()):
+                        label_item = form_layout.itemAt(row, QFormLayout.ItemRole.LabelRole)
+                        field_item = form_layout.itemAt(row, QFormLayout.ItemRole.FieldRole)
+                        
+                        if not label_item or not field_item:
+                            continue
+                            
+                        label_widget = label_item.widget()
+                        field_widget = field_item.widget()
+                        
+                        if not label_widget or not field_widget:
+                            continue
+                        
+                        # Get the field name from the label text
+                        field_name = label_widget.text().replace(":", "").lower()
+                        
+                        # Extract value based on widget type
+                        if isinstance(field_widget, QLineEdit):
+                            value = field_widget.text().strip()
+                            if field_name == "id":
+                                agent_data["id"] = value
+                            elif field_name == "name":
+                                agent_data["name"] = value
+                            elif field_name == "description":
+                                agent_data["description"] = value
+                            elif field_name == "url":
+                                agent_data["url"] = value
+                            elif field_name == "api key name":
+                                agent_data["authentication"]["api_key_name"] = value
+                            elif field_name == "token":
+                                agent_data["authentication"]["token"] = value
+                        elif isinstance(field_widget, QComboBox):
+                            value = field_widget.currentText()
+                            if field_name == "auth type":
+                                agent_data["authentication"]["auth_type"] = value
+                        elif isinstance(field_widget, QCheckBox):
+                            value = field_widget.isChecked()
+                            if field_name == "streaming":
+                                agent_data["capabilities"]["streaming"] = value
+                            elif field_name == "push notifications":
+                                agent_data["capabilities"]["push_notifications"] = value
+                            elif field_name == "file upload":
+                                agent_data["capabilities"]["file_upload"] = value
+                            elif field_name == "tool use":
+                                agent_data["capabilities"]["tool_use"] = value
+                            elif field_name == "default agent":
+                                agent_data["is_default"] = value
+            
+            # Ensure all required capabilities are set
+            for cap in ["streaming", "push_notifications", "file_upload", "tool_use"]:
+                if cap not in agent_data["capabilities"]:
+                    agent_data["capabilities"][cap] = False
+            
+            # Ensure all required authentication fields are set
+            if "auth_type" not in agent_data["authentication"]:
+                agent_data["authentication"]["auth_type"] = "none"
+            if "api_key_name" not in agent_data["authentication"]:
+                agent_data["authentication"]["api_key_name"] = ""
+            if "token" not in agent_data["authentication"]:
+                agent_data["authentication"]["token"] = ""
+            
+            # Log the extracted data for debugging
+            logger.debug(f"Extracted agent data: {agent_data}")
+            
+            return agent_data
+            
+        except Exception as e:
+            logger.error(f"Error extracting agent data from form: {e}")
+            return None
