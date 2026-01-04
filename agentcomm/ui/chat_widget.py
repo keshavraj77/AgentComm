@@ -804,8 +804,7 @@ class ChatWidget(QWidget):
                         # Auto-rename to first 25 chars of message
                         new_title = message[:25] + ("..." if len(message) > 25 else "")
                         self.session_manager.rename_thread(current_thread.thread_id, new_title)
-                        # Schedule thread list refresh in main thread
-                        QMetaObject.invokeMethod(self, "refresh_thread_list", Qt.ConnectionType.QueuedConnection)
+                        # Thread list will be refreshed by the session manager's thread callback
 
             # Send the message
             await self.session_manager.send_message(message)
@@ -1060,98 +1059,6 @@ class ChatWidget(QWidget):
         self.chat_scroll_area.verticalScrollBar().setValue(
             self.chat_scroll_area.verticalScrollBar().maximum()
         )
-
-    @pyqtSlot()
-    def refresh_thread_list(self):
-        """
-        Refresh the thread dropdown list
-        """
-        # Block signals to avoid triggering on_thread_changed
-        self.thread_selector.blockSignals(True)
-
-        # Save current selection
-        current_thread = self.session_manager.get_current_thread()
-        current_thread_id = current_thread.thread_id if current_thread else None
-
-        # Clear and repopulate the dropdown
-        self.thread_selector.clear()
-
-        # Get threads for the current entity
-        threads = self.session_manager.get_threads_for_entity()
-
-        # Add threads to dropdown
-        for thread in threads:
-            self.thread_selector.addItem(thread.title, thread.thread_id)
-
-        # Restore selection
-        if current_thread_id:
-            index = self.thread_selector.findData(current_thread_id)
-            if index >= 0:
-                self.thread_selector.setCurrentIndex(index)
-
-        # Re-enable signals
-        self.thread_selector.blockSignals(False)
-
-        # Update button states
-        has_threads = len(threads) > 0
-        self.rename_thread_btn.setEnabled(has_threads)
-        self.delete_thread_btn.setEnabled(has_threads and len(threads) > 1)
-
-    def on_thread_changed(self, index: int):
-        """
-        Handle thread selection change
-
-        Args:
-            index: Index of the selected thread
-        """
-        if index < 0:
-            return
-
-        thread_id = self.thread_selector.itemData(index)
-        if thread_id and self.session_manager.switch_thread(thread_id):
-            # Clear and reload chat
-            self.clear_chat()
-            self.load_chat_history()
-
-    def create_new_thread(self):
-        """
-        Create a new thread for the current entity
-        """
-        if not self.current_entity_id:
-            logger.warning("No entity selected")
-            return
-
-        thread_id = self.session_manager.create_thread(self.current_entity_id, self.current_entity_type)
-        if thread_id:
-            # Switch to the new thread
-            if self.session_manager.switch_thread(thread_id):
-                # Refresh the thread list and load history
-                self.refresh_thread_list()
-                self.clear_chat()
-                self.load_chat_history()
-
-    def rename_current_thread(self):
-        """
-        Rename the current thread
-        """
-        current_thread = self.session_manager.get_current_thread()
-        if not current_thread:
-            logger.warning("No thread selected")
-            return
-
-        # Use styled input dialog
-        from agentcomm.ui.custom_dialogs import StyledInputDialog
-
-        new_title, ok = StyledInputDialog.get_text_input(
-            self,
-            "Rename Thread",
-            "Enter new thread name:",
-            current_thread.title
-        )
-
-        if ok and new_title.strip():
-            if self.session_manager.rename_thread(current_thread.thread_id, new_title.strip()):
-                self.refresh_thread_list()
 
     def delete_current_thread(self):
         """
