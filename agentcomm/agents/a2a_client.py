@@ -113,16 +113,35 @@ class A2AClient:
         # Add push notification configuration if webhook URL is provided
         if webhook_url:
             push_config = {
+                "id": str(uuid.uuid4()),
                 "url": webhook_url,
             }
             
+            # Add authentication if provided
             if auth_headers:
-                push_config["authentication"] = {
-                    "schemes": list(auth_headers.keys())
-                }
-                # Convert to proper type for PushNotificationConfig
-                if isinstance(push_config, dict):
-                    push_config = PushNotificationConfig(**push_config)
+                # Extract authentication schemes from headers
+                schemes = []
+                credentials = None
+                
+                for header_name, header_value in auth_headers.items():
+                    if header_name.lower() == "authorization":
+                        # Parse Authorization header
+                        if header_value.startswith("Bearer "):
+                            schemes.append("Bearer")
+                            credentials = header_value.split(" ", 1)[1] if len(header_value.split(" ", 1)) > 1 else None
+                        elif header_value.startswith("Basic "):
+                            schemes.append("Basic")
+                            credentials = header_value.split(" ", 1)[1] if len(header_value.split(" ", 1)) > 1 else None
+                    else:
+                        # API key or custom header
+                        schemes.append(header_name)
+                
+                if schemes:
+                    push_config["authentication"] = {
+                        "schemes": schemes
+                    }
+                    if credentials:
+                        push_config["authentication"]["credentials"] = credentials
             
             payload["params"]["configuration"]["pushNotificationConfig"] = push_config
         

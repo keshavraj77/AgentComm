@@ -12,7 +12,8 @@ from a2a.client import A2AClient, ClientFactory, ClientConfig
 from a2a.types import (
     AgentCard, TransportProtocol, SecurityScheme,
     HTTPAuthSecurityScheme, APIKeySecurityScheme,
-    AgentCapabilities, Role
+    AgentCapabilities, Role,
+    MessageSendConfiguration, PushNotificationConfig
 )
 from a2a.client import create_text_message_object
 from a2a.client.auth import InMemoryContextCredentialStore
@@ -27,7 +28,15 @@ class A2ASDKClientWrapper:
 
     def __init__(self):
         """Initialize the A2A SDK client wrapper"""
-        self.http_client = httpx.AsyncClient()
+        # Configure httpx client with longer timeout for streaming responses
+        # Default timeout is 5 seconds which is too short for long-running agent tasks
+        timeout = httpx.Timeout(
+            connect=10.0,  # Connection timeout
+            read=300.0,    # Read timeout (5 minutes for long-running tasks)
+            write=10.0,    # Write timeout
+            pool=10.0      # Pool timeout
+        )
+        self.http_client = httpx.AsyncClient(timeout=timeout)
         self.clients: Dict[str, Any] = {}
         self.credential_store = InMemoryContextCredentialStore()
 
@@ -81,10 +90,10 @@ class A2ASDKClientWrapper:
                 )
                 security = [{"basic": []}]
 
-        # Create capabilities
+        # Create capabilities - enable push notifications by default
         capabilities = AgentCapabilities(
             streaming=True,
-            push_notifications=False
+            push_notifications=True
         )
 
         # Create and return the agent card
@@ -189,7 +198,8 @@ class A2ASDKClientWrapper:
         api_key_name: Optional[str] = None,
         token: Optional[str] = None,
         context_id: Optional[str] = None,
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        push_notification_config: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Send a message to an A2A agent
@@ -203,6 +213,7 @@ class A2ASDKClientWrapper:
             token: Authentication token
             context_id: Optional context ID
             task_id: Optional task ID
+            push_notification_config: Optional push notification configuration
 
         Yields:
             Response dictionaries from the agent
@@ -238,9 +249,19 @@ class A2ASDKClientWrapper:
                 elif auth_type == "basic":
                     headers["Authorization"] = f"Basic {token}"
 
+            # Prepare configuration
+            config_kwargs = {}
+            if push_notification_config:
+                logger.info(f"Adding push notification config: {push_notification_config}")
+                # Create PushNotificationConfig object
+                push_config = PushNotificationConfig(**push_notification_config)
+                # Create MessageSendConfiguration with push config
+                config = MessageSendConfiguration(push_notification_config=push_config)
+                config_kwargs["configuration"] = config
+
             # Send message and yield responses
-            logger.info(f"Calling client.send_message() method")
-            async for response in client.send_message(msg):
+            logger.info(f"Calling client.send_message() method with config: {config_kwargs}")
+            async for response in client.send_message(msg, **config_kwargs):
                 logger.debug(f"Received response: {response}")
                 yield {
                     "result": response
@@ -264,7 +285,8 @@ class A2ASDKClientWrapper:
         api_key_name: Optional[str] = None,
         token: Optional[str] = None,
         context_id: Optional[str] = None,
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        push_notification_config: Optional[Dict[str, Any]] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Send a streaming message to an A2A agent
@@ -278,6 +300,7 @@ class A2ASDKClientWrapper:
             token: Authentication token
             context_id: Optional context ID
             task_id: Optional task ID
+            push_notification_config: Optional push notification configuration
 
         Yields:
             Streaming response chunks from the agent
@@ -313,20 +336,61 @@ class A2ASDKClientWrapper:
                 elif auth_type == "basic":
                     headers["Authorization"] = f"Basic {token}"
 
-            # Send message and stream responses
-            logger.info(f"Calling client.send_message() method")
-            chunk_count = 0
-            async for chunk in client.send_message(msg):
-                chunk_count += 1
-                logger.info(f"Received chunk #{chunk_count}: type={type(chunk).__name__}")
-                logger.debug(f"Chunk content: {chunk}")
-                yield {
-                    "result": chunk
-                }
-            logger.info(f"Streaming completed. Total chunks received: {chunk_count}")
+            # Prepare configuration
+            config_kwargs = {}
+            if push_notification_config:
+                logger.info(f"Adding push notification config for streaming: {push_notification_config}")
+                # Create PushNotificationConfig object
+                push_config = PushNotificationConfig(**push_notification_config)
+                # Create MessageSendConfiguration with push config
+                config = MessageSendConfiguration(push_notification_config=push_config)
+                config_kwargs["configuration"] = config
+
+            # Send message and stream responses with retry logic
+            logger.info(f"Calling client.send_message() method with config: {config_kwargs}")
+            max_retries = 2
+            retry_count = 0
+
+            while retry_count <= max_retries:
+                try:
+                    chunk_count = 0
+                    async for chunk in client.send_message(msg, **config_kwargs):
+                        chunk_count += 1
+                        logger.info(f"Received chunk #{chunk_count}: type={type(chunk).__name__}")
+                        logger.debug(f"Chunk content: {chunk}")
+                        yield {
+                            "result": chunk
+                        }
+                    logger.info(f"Streaming completed. Total chunks received: {chunk_count}")
+                    break  # Success, exit retry loop
+
+                except Exception as send_error:
+                    error_str = str(send_error)
+                    # Check if it's a retryable error (503, connection errors)
+                    if retry_count < max_retries and ('503' in error_str or 'connection' in error_str.lower()):
+                        retry_count += 1
+                        logger.warning(f"Retryable error, attempt {retry_count}/{max_retries}: {send_error}")
+
+                        # Clear and recreate client for fresh connection
+                        client_key = f"{agent_url}:{transport}"
+                        if client_key in self.clients:
+                            del self.clients[client_key]
+                        client = await self.get_client(agent_url, transport, auth_type, api_key_name, token)
+
+                        import asyncio
+                        await asyncio.sleep(1)  # Wait before retry
+                    else:
+                        raise  # Re-raise non-retryable errors
 
         except Exception as e:
             logger.error(f"Error sending streaming message via A2A SDK: {e}", exc_info=True)
+
+            # Clear cached client on connection errors to force reconnection
+            client_key = f"{agent_url}:{transport}"
+            if client_key in self.clients:
+                logger.info(f"Clearing cached client for {agent_url} due to error")
+                del self.clients[client_key]
+
             yield {
                 "error": {
                     "code": -1,

@@ -44,6 +44,11 @@ class Settings:
             "webhook_host": "localhost",
             "default_agent": "interview_prep",
             "default_llm_provider": "OpenAI",
+            "ngrok": {
+                "enabled": False,
+                "auth_token": "",
+                "region": "us"  # Supported regions: us, eu, ap, au, sa, jp, in
+            },
             "ui": {
                 "theme": "light",
                 "font_size": 12,

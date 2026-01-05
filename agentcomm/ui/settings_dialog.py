@@ -350,24 +350,118 @@ class SettingsDialog(QDialog):
         # Create the layout
         layout = QVBoxLayout(self.general_tab)
 
-        # Create the general settings form
-        form_layout = QFormLayout()
-        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        
-        # Add the settings
+        # Create scroll area for settings
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        container_layout = QVBoxLayout(container)
+
+        # Webhook Settings Group
+        webhook_group = QGroupBox("Webhook Settings")
+        webhook_layout = QFormLayout()
+        webhook_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        webhook_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
         self.webhook_port_input = QSpinBox()
         self.webhook_port_input.setMinimum(1024)
         self.webhook_port_input.setMaximum(65535)
         self.webhook_port_input.setValue(8000)
-        form_layout.addRow("Webhook Port:", self.webhook_port_input)
-        
+        webhook_layout.addRow("Webhook Port:", self.webhook_port_input)
+
+        webhook_group.setLayout(webhook_layout)
+        container_layout.addWidget(webhook_group)
+
+        # ngrok Settings Group
+        ngrok_group = QGroupBox("Push Notifications (ngrok)")
+        ngrok_layout = QFormLayout()
+        ngrok_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        ngrok_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        self.ngrok_enabled_checkbox = QCheckBox("Enable push notifications via ngrok")
+        self.ngrok_enabled_checkbox.setChecked(False)
+        ngrok_layout.addRow("", self.ngrok_enabled_checkbox)
+
+        # Add info label
+        info_label = QLabel("Push notifications allow agents to send real-time updates.\nRequires ngrok account (free): https://ngrok.com")
+        info_label.setStyleSheet("color: #a0aec0; font-size: 11px; padding: 5px;")
+        info_label.setWordWrap(True)
+        ngrok_layout.addRow("", info_label)
+
+        self.ngrok_token_input = QLineEdit()
+        self.ngrok_token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ngrok_token_input.setPlaceholderText("Enter your ngrok auth token")
+        ngrok_layout.addRow("ngrok Auth Token:", self.ngrok_token_input)
+
+        self.ngrok_region_combo = QComboBox()
+        self.ngrok_region_combo.addItems(["us", "eu", "ap", "au", "sa", "jp", "in"])
+        self.ngrok_region_combo.setCurrentText("us")
+        ngrok_layout.addRow("ngrok Region:", self.ngrok_region_combo)
+
+        # Add help button
+        help_button = QPushButton("How to get ngrok token?")
+        help_button.clicked.connect(self.show_ngrok_help)
+        ngrok_layout.addRow("", help_button)
+
+        ngrok_group.setLayout(ngrok_layout)
+        container_layout.addWidget(ngrok_group)
+
+        # General Settings Group
+        general_group = QGroupBox("General Settings")
+        general_layout = QFormLayout()
+        general_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        general_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
         self.auto_connect_checkbox = QCheckBox("Auto-connect to default agent")
         self.auto_connect_checkbox.setChecked(True)
-        form_layout.addRow("", self.auto_connect_checkbox)
-        
-        layout.addLayout(form_layout)
-        layout.addStretch()
+        general_layout.addRow("", self.auto_connect_checkbox)
+
+        general_group.setLayout(general_layout)
+        container_layout.addWidget(general_group)
+
+        container_layout.addStretch()
+        scroll_area.setWidget(container)
+        layout.addWidget(scroll_area)
+
+        # Load current settings
+        self.load_general_settings()
+
+    def load_general_settings(self):
+        """Load general settings from config"""
+        try:
+            from agentcomm.config.settings import Settings
+            settings = Settings()
+
+            # Load webhook settings
+            self.webhook_port_input.setValue(settings.get("webhook_port", 8000))
+
+            # Load ngrok settings
+            self.ngrok_enabled_checkbox.setChecked(settings.get("ngrok.enabled", False))
+            self.ngrok_token_input.setText(settings.get("ngrok.auth_token", ""))
+            self.ngrok_region_combo.setCurrentText(settings.get("ngrok.region", "us"))
+
+            # Load general settings
+            # Note: auto_connect setting may not exist yet, will be added when implementing
+
+        except Exception as e:
+            logger.error(f"Error loading general settings: {e}")
+
+    def show_ngrok_help(self):
+        """Show help dialog for ngrok setup"""
+        help_text = """<h3>How to Get ngrok Auth Token</h3>
+        <p><b>Step 1:</b> Sign up for a free ngrok account at <a href="https://ngrok.com">https://ngrok.com</a></p>
+        <p><b>Step 2:</b> Log in to your ngrok dashboard</p>
+        <p><b>Step 3:</b> Go to "Your Authtoken" section</p>
+        <p><b>Step 4:</b> Copy your auth token</p>
+        <p><b>Step 5:</b> Paste it in the "ngrok Auth Token" field above</p>
+        <br>
+        <p><b>Note:</b> The free tier is sufficient for this application.</p>
+        <p>Once configured, agents will be able to send you real-time push notifications when tasks complete.</p>
+        """
+
+        StyledMessageBox.information(self, "ngrok Setup Help", help_text)
     
     def load_agents(self):
         """
@@ -824,6 +918,17 @@ class SettingsDialog(QDialog):
             # Save all LLM configurations
             config_store = self.agent_registry.config_store
             success = True
+
+            # Save general settings (webhook port and ngrok)
+            from agentcomm.config.settings import Settings
+            settings = Settings()
+
+            settings.set("webhook_port", self.webhook_port_input.value())
+            settings.set("ngrok.enabled", self.ngrok_enabled_checkbox.isChecked())
+            settings.set("ngrok.auth_token", self.ngrok_token_input.text())
+            settings.set("ngrok.region", self.ngrok_region_combo.currentText())
+
+            logger.info(f"Saved general settings: webhook_port={self.webhook_port_input.value()}, ngrok_enabled={self.ngrok_enabled_checkbox.isChecked()}")
 
             # Process LLM settings
             for llm_id, inputs in self.llm_inputs.items():

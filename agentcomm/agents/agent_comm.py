@@ -11,6 +11,7 @@ from agentcomm.agents.agent_registry import Agent, AgentRegistry
 from agentcomm.agents.a2a_client import A2AClient, Message
 from agentcomm.agents.a2a_sdk_client import A2ASDKClientWrapper
 from agentcomm.agents.webhook_handler import WebhookHandler
+from agentcomm.agents.ngrok_manager import NgrokManager
 
 logger = logging.getLogger(__name__)
 
@@ -19,16 +20,26 @@ class AgentComm:
     Simplified wrapper for agent communication
     """
 
-    def __init__(self, agent: Agent, use_sdk: bool = True):
+    def __init__(
+        self,
+        agent: Agent,
+        use_sdk: bool = True,
+        webhook_handler: Optional[WebhookHandler] = None,
+        ngrok_manager: Optional[NgrokManager] = None
+    ):
         """
         Initialize the agent communication wrapper
 
         Args:
             agent: Agent to communicate with
             use_sdk: Whether to use the official A2A SDK (default: True)
+            webhook_handler: Optional webhook handler for push notifications
+            ngrok_manager: Optional ngrok manager for secure tunneling
         """
         self.agent = agent
         self.use_sdk = use_sdk
+        self.webhook_handler = webhook_handler
+        self.ngrok_manager = ngrok_manager
 
         if use_sdk:
             self.a2a_sdk_client = A2ASDKClientWrapper()
@@ -40,7 +51,62 @@ class AgentComm:
         self.context_id: Optional[str] = None
         self.last_response: Optional[str] = None
         self.last_task_id: Optional[str] = None
-    
+
+    def _generate_push_notification_config(self) -> Optional[Dict[str, Any]]:
+        """
+        Generate push notification config for agent requests
+
+        Returns:
+            Push notification config dict or None if not available
+        """
+        if not self.webhook_handler or not self.agent.capabilities.push_notifications:
+            return None
+
+        import uuid
+
+        # Determine webhook URL
+        if self.ngrok_manager and self.ngrok_manager.is_active():
+            base_url = self.ngrok_manager.get_public_url()
+            webhook_url = f"{base_url}/webhook"
+            logger.info(f"Using ngrok webhook URL for push notifications: {webhook_url}")
+        else:
+            webhook_url = f"http://localhost:{self.webhook_handler.port}/webhook"
+            logger.debug("Using localhost webhook URL (push notifications may not work with remote agents)")
+
+        # Generate authentication token
+        token = str(uuid.uuid4())
+
+        # Create push notification config according to A2A spec
+        push_config = {
+            "id": str(uuid.uuid4()),
+            "url": webhook_url,
+            "token": token
+        }
+
+        # Add authentication if available
+        auth_headers = self.agent.authentication.get_headers()
+        if auth_headers:
+            schemes = []
+            credentials = None
+
+            for header_name, header_value in auth_headers.items():
+                if header_name.lower() == "authorization":
+                    if header_value.startswith("Bearer "):
+                        schemes.append("Bearer")
+                        credentials = header_value.split(" ", 1)[1] if len(header_value.split(" ", 1)) > 1 else None
+                    elif header_value.startswith("Basic "):
+                        schemes.append("Basic")
+                        credentials = header_value.split(" ", 1)[1] if len(header_value.split(" ", 1)) > 1 else None
+                else:
+                    schemes.append(header_name)
+
+            if schemes:
+                push_config["authentication"] = {"schemes": schemes}
+                if credentials:
+                    push_config["authentication"]["credentials"] = credentials
+
+        return push_config
+
     async def send_message(self, message: str) -> str:
         """
         Send a message to the agent and return the complete response
@@ -56,6 +122,7 @@ class AgentComm:
 
             if self.use_sdk and self.a2a_sdk_client:
                 # Use the official A2A SDK
+                push_config = self._generate_push_notification_config()
                 async for response in self.a2a_sdk_client.send_message(
                     agent_url=self.agent.url,
                     message=message,
@@ -63,7 +130,8 @@ class AgentComm:
                     auth_type=self.agent.authentication.auth_type,
                     api_key_name=self.agent.authentication.api_key_name,
                     token=self.agent.authentication.token,
-                    context_id=self.context_id
+                    context_id=self.context_id,
+                    push_notification_config=push_config
                 ):
                     if "result" in response:
                         result = response["result"]
@@ -157,6 +225,7 @@ class AgentComm:
             if self.use_sdk and self.a2a_sdk_client:
                 # Use the official A2A SDK
                 logger.info(f"Using A2A SDK to send streaming message")
+                push_config = self._generate_push_notification_config()
                 async for response in self.a2a_sdk_client.send_streaming_message(
                     agent_url=self.agent.url,
                     message=message,
@@ -164,7 +233,8 @@ class AgentComm:
                     auth_type=self.agent.authentication.auth_type,
                     api_key_name=self.agent.authentication.api_key_name,
                     token=self.agent.authentication.token,
-                    context_id=self.context_id
+                    context_id=self.context_id,
+                    push_notification_config=push_config
                 ):
                     logger.info(f"=== AgentComm received response ===")
                     logger.info(f"Response keys: {response.keys() if isinstance(response, dict) else 'not a dict'}")
@@ -232,8 +302,9 @@ class AgentComm:
                                     event_dict = event.model_dump()
                                     logger.info(f"Full event dump: {event_dict}")
 
-                            # Check if task is completed
+                            # Check task states
                             is_completed = str(task_state) == 'TaskState.completed'
+                            is_submitted = str(task_state) == 'TaskState.submitted'
 
                             # If task just transitioned to completed, send a clear signal
                             if is_completed and last_task_state != 'TaskState.completed':
@@ -244,9 +315,37 @@ class AgentComm:
                             # Update the last known state
                             last_task_state = str(task_state)
 
+                            # Handle submitted state - extract status message (polling instructions)
+                            if is_submitted:
+                                logger.info(f"Task submitted - extracting status message for polling instructions")
+                                
+                                # Check if task has artifacts (some agents send initial content in artifacts even when submitted)
+                                if task and hasattr(task, 'artifacts') and task.artifacts:
+                                    logger.info(f"Task has {len(task.artifacts)} artifacts in submitted state")
+                                    for idx, artifact in enumerate(task.artifacts):
+                                        if hasattr(artifact, 'parts') and artifact.parts:
+                                            for part in artifact.parts:
+                                                if hasattr(part, 'root') and hasattr(part.root, 'text') and part.root.text:
+                                                    chunk += part.root.text
+                                                    logger.info(f"✓ Extracted text from submitted artifact: {part.root.text[:100]}...")
+                                                elif hasattr(part, 'text') and part.text:
+                                                    chunk += part.text
+                                                    logger.info(f"✓ Extracted text from submitted artifact: {part.text[:100]}...")
+                                
+                                # Also check status message for polling instructions
+                                if task and hasattr(task, 'status') and hasattr(task.status, 'message') and task.status.message:
+                                    if hasattr(task.status.message, 'parts') and task.status.message.parts:
+                                        for part in task.status.message.parts:
+                                            if hasattr(part, 'root') and hasattr(part.root, 'text') and part.root.text:
+                                                chunk += part.root.text
+                                                logger.info(f"✓ Extracted text from submitted status: {part.root.text[:100]}...")
+                                            elif hasattr(part, 'text') and part.text:
+                                                chunk += part.text
+                                                logger.info(f"✓ Extracted text from submitted status: {part.text[:100]}...")
+
                             # If task is completed, ONLY extract from artifacts (the final result)
                             # Don't include status messages in the final output
-                            if is_completed:
+                            elif is_completed:
                                 logger.info(f"Task completed - extracting ONLY from artifacts")
                                 if task and hasattr(task, 'artifacts') and task.artifacts:
                                     logger.info(f"Task has {len(task.artifacts)} artifacts")
@@ -460,19 +559,22 @@ class AgentCommunicationManager:
         self,
         agent_registry: AgentRegistry,
         a2a_client: Optional[A2AClient] = None,
-        webhook_handler: Optional[WebhookHandler] = None
+        webhook_handler: Optional[WebhookHandler] = None,
+        ngrok_manager: Optional[NgrokManager] = None
     ):
         """
         Initialize the agent communication manager
-        
+
         Args:
             agent_registry: AgentRegistry instance
             a2a_client: Optional A2AClient instance
             webhook_handler: Optional WebhookHandler instance
+            ngrok_manager: Optional NgrokManager instance for secure tunneling
         """
         self.agent_registry = agent_registry
         self.a2a_client = a2a_client or A2AClient()
         self.webhook_handler = webhook_handler
+        self.ngrok_manager = ngrok_manager
         self.active_tasks: Dict[str, Dict[str, Any]] = {}
         self.message_callbacks: Dict[str, List[Callable]] = {}
     
@@ -547,19 +649,57 @@ class AgentCommunicationManager:
         # Get authentication headers
         auth_headers = agent.authentication.get_headers()
         
-        # Prepare webhook URL if needed
+        # Prepare webhook URL and push notification config if needed
         webhook_config = None
+        push_notification_config = None
         if use_webhook and self.webhook_handler:
             if not webhook_url:
-                webhook_url = f"http://localhost:{self.webhook_handler.port}/webhook"
-            
+                # Use ngrok public URL if available, otherwise fall back to localhost
+                if self.ngrok_manager and self.ngrok_manager.is_active():
+                    base_url = self.ngrok_manager.get_public_url()
+                    webhook_url = f"{base_url}/webhook"
+                    logger.info(f"Using ngrok webhook URL: {webhook_url}")
+                else:
+                    webhook_url = f"http://localhost:{self.webhook_handler.port}/webhook"
+                    logger.warning("ngrok not available, using localhost webhook URL (may not work with remote agents)")
+
             # Generate a token for authentication
             token = str(uuid.uuid4())
-            
+
             webhook_config = {
                 "url": webhook_url,
                 "token": token
             }
+
+            # Create push notification config according to A2A spec
+            push_notification_config = {
+                "id": str(uuid.uuid4()),
+                "url": webhook_url,
+                "token": token
+            }
+            
+            # Add authentication if available
+            if auth_headers:
+                schemes = []
+                credentials = None
+                
+                for header_name, header_value in auth_headers.items():
+                    if header_name.lower() == "authorization":
+                        if header_value.startswith("Bearer "):
+                            schemes.append("Bearer")
+                            credentials = header_value.split(" ", 1)[1] if len(header_value.split(" ", 1)) > 1 else None
+                        elif header_value.startswith("Basic "):
+                            schemes.append("Basic")
+                            credentials = header_value.split(" ", 1)[1] if len(header_value.split(" ", 1)) > 1 else None
+                    else:
+                        schemes.append(header_name)
+                
+                if schemes:
+                    push_notification_config["authentication"] = {
+                        "schemes": schemes
+                    }
+                    if credentials:
+                        push_notification_config["authentication"]["credentials"] = credentials
         
         try:
             # Send the message

@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Callable, Any
 
 from agentcomm.agents.agent_registry import AgentRegistry
 from agentcomm.agents.agent_comm import AgentComm
+from agentcomm.agents.webhook_handler import WebhookHandler
+from agentcomm.agents.ngrok_manager import NgrokManager
 from agentcomm.llm.llm_router import LLMRouter
 from agentcomm.llm.chat_history import ChatHistory
 from agentcomm.core.thread import Thread
@@ -25,7 +27,14 @@ class SessionManager:
     Handles agent and LLM interactions, chat history, and session state
     """
 
-    def __init__(self, agent_registry: AgentRegistry, llm_router: LLMRouter, system_prompt: Optional[str] = None):
+    def __init__(
+        self,
+        agent_registry: AgentRegistry,
+        llm_router: LLMRouter,
+        system_prompt: Optional[str] = None,
+        webhook_handler: Optional[WebhookHandler] = None,
+        ngrok_manager: Optional[NgrokManager] = None
+    ):
         """
         Initialize the session manager
 
@@ -33,10 +42,14 @@ class SessionManager:
             agent_registry: Registry of available agents
             llm_router: Router for LLM requests
             system_prompt: Optional system prompt for LLM interactions
+            webhook_handler: Optional webhook handler for push notifications
+            ngrok_manager: Optional ngrok manager for secure tunneling
         """
         self.agent_registry = agent_registry
         self.llm_router = llm_router
         self.agent_comm: Optional[AgentComm] = None
+        self.webhook_handler = webhook_handler
+        self.ngrok_manager = ngrok_manager
         self.current_entity_id: Optional[str] = None
         self.current_entity_type: Optional[str] = None
         self.current_thread_id: Optional[str] = None
@@ -52,6 +65,12 @@ class SessionManager:
 
         # Auto-save callback
         self.auto_save_callback: Optional[Callable[[], None]] = None
+
+    async def start(self):
+        """Start the session manager and async components"""
+        # Start ngrok tunnel if ngrok manager is available
+        if self.ngrok_manager:
+            await self._start_ngrok_tunnel()
         
     def register_message_callback(self, callback: Callable[[str, str, str], None]) -> None:
         """
@@ -100,7 +119,22 @@ class SessionManager:
             callback: Function to call when threads should be saved
         """
         self.auto_save_callback = callback
-        
+
+    async def _start_ngrok_tunnel(self):
+        """Start ngrok tunnel for webhook handler"""
+        if not self.webhook_handler or not self.ngrok_manager:
+            return
+
+        try:
+            logger.info("Starting ngrok tunnel for webhook handler...")
+            public_url = await self.ngrok_manager.start_tunnel(self.webhook_handler.port)
+            if public_url:
+                logger.info(f"ngrok tunnel started: {public_url}")
+            else:
+                logger.error("Failed to start ngrok tunnel")
+        except Exception as e:
+            logger.error(f"Error starting ngrok tunnel: {e}")
+
     def select_agent(self, agent_id: str, thread_id: Optional[str] = None) -> bool:
         """
         Select an agent to interact with
@@ -120,7 +154,11 @@ class SessionManager:
 
             self.current_entity_id = agent_id
             self.current_entity_type = "agent"
-            self.agent_comm = AgentComm(agent)
+            self.agent_comm = AgentComm(
+                agent,
+                webhook_handler=self.webhook_handler,
+                ngrok_manager=self.ngrok_manager
+            )
 
             # Initialize threads dict for this agent if it doesn't exist
             if agent_id not in self.threads:
