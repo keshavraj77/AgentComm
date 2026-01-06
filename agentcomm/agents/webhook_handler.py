@@ -29,6 +29,7 @@ class WebhookHandler:
         self.app = FastAPI(title="A2A Client Webhook Handler")
         self.callbacks: Dict[str, List[Callable]] = {}
         self.tokens: Dict[str, str] = {}
+        self.thread_ids: Dict[str, str] = {}  # Map task_id -> thread_id
         
         # Register routes
         self.app.post("/webhook")(self.handle_webhook)
@@ -36,13 +37,19 @@ class WebhookHandler:
         
         logger.info(f"Webhook handler initialized on {host}:{port}")
     
-    async def handle_webhook(self, request: Request, authorization: Optional[str] = Header(None)):
+    async def handle_webhook(
+        self,
+        request: Request,
+        authorization: Optional[str] = Header(None),
+        x_webhook_token: Optional[str] = Header(None)
+    ):
         """
         Handle incoming webhook notifications
         
         Args:
             request: FastAPI request object
-            authorization: Optional authorization header
+            authorization: Optional authorization header (Bearer token)
+            x_webhook_token: Optional X-Webhook-Token header
             
         Returns:
             JSONResponse with acknowledgment
@@ -72,17 +79,27 @@ class WebhookHandler:
             # Validate token if available
             if task_id in self.tokens:
                 expected_token = self.tokens[task_id]
-                if authorization:
+                received_token = None
+                
+                # Check X-Webhook-Token header first (custom header used by some agents)
+                if x_webhook_token:
+                    received_token = x_webhook_token
+                    logger.debug(f"Token received via X-Webhook-Token header")
+                # Fall back to Authorization header
+                elif authorization:
                     # Extract token from Authorization header
                     auth_parts = authorization.split()
                     if len(auth_parts) == 2 and auth_parts[0].lower() == "bearer":
-                        token = auth_parts[1]
-                        if token != expected_token:
-                            raise HTTPException(status_code=401, detail="Invalid token")
+                        received_token = auth_parts[1]
+                        logger.debug(f"Token received via Authorization Bearer header")
                     else:
                         raise HTTPException(status_code=401, detail="Invalid authorization header format")
                 else:
                     raise HTTPException(status_code=401, detail="Missing authorization header")
+                
+                # Validate the token
+                if received_token != expected_token:
+                    raise HTTPException(status_code=401, detail="Invalid token")
             
             # Process the notification
             await self._process_notification(task_id, task)
@@ -123,7 +140,8 @@ class WebhookHandler:
         self,
         task_id: str,
         request: Request,
-        authorization: Optional[str] = Header(None)
+        authorization: Optional[str] = Header(None),
+        x_webhook_token: Optional[str] = Header(None)
     ):
         """
         Handle incoming webhook notifications for a specific task
@@ -131,7 +149,8 @@ class WebhookHandler:
         Args:
             task_id: ID of the task
             request: FastAPI request object
-            authorization: Optional authorization header
+            authorization: Optional authorization header (Bearer token)
+            x_webhook_token: Optional X-Webhook-Token header
             
         Returns:
             JSONResponse with acknowledgment
@@ -157,17 +176,27 @@ class WebhookHandler:
             # Validate token if available
             if task_id in self.tokens:
                 expected_token = self.tokens[task_id]
-                if authorization:
+                received_token = None
+                
+                # Check X-Webhook-Token header first (custom header used by some agents)
+                if x_webhook_token:
+                    received_token = x_webhook_token
+                    logger.debug(f"Token received via X-Webhook-Token header")
+                # Fall back to Authorization header
+                elif authorization:
                     # Extract token from Authorization header
                     auth_parts = authorization.split()
                     if len(auth_parts) == 2 and auth_parts[0].lower() == "bearer":
-                        token = auth_parts[1]
-                        if token != expected_token:
-                            raise HTTPException(status_code=401, detail="Invalid token")
+                        received_token = auth_parts[1]
+                        logger.debug(f"Token received via Authorization Bearer header")
                     else:
                         raise HTTPException(status_code=401, detail="Invalid authorization header format")
                 else:
                     raise HTTPException(status_code=401, detail="Missing authorization header")
+                
+                # Validate the token
+                if received_token != expected_token:
+                    raise HTTPException(status_code=401, detail="Invalid token")
             
             # Process the notification
             await self._process_notification(task_id, task)
@@ -219,7 +248,7 @@ class WebhookHandler:
                 except Exception as e:
                     logger.error(f"Error in callback for task {task_id}: {e}")
     
-    def register_callback(self, task_id: str, callback: Callable, token: Optional[str] = None):
+    def register_callback(self, task_id: str, callback: Callable, token: Optional[str] = None, thread_id: Optional[str] = None):
         """
         Register a callback for a task
         
@@ -227,6 +256,7 @@ class WebhookHandler:
             task_id: ID of the task
             callback: Callback function to call when a notification is received
             token: Optional token for authentication
+            thread_id: Optional thread ID to associate with this task
         """
         if task_id not in self.callbacks:
             self.callbacks[task_id] = []
@@ -236,7 +266,10 @@ class WebhookHandler:
         if token:
             self.tokens[task_id] = token
         
-        logger.debug(f"Registered callback for task {task_id}")
+        if thread_id:
+            self.thread_ids[task_id] = thread_id
+        
+        logger.debug(f"Registered callback for task {task_id}" + (f" in thread {thread_id}" if thread_id else ""))
     
     def unregister_callback(self, task_id: str, callback: Optional[Callable] = None):
         """
@@ -251,6 +284,8 @@ class WebhookHandler:
                 self.callbacks.pop(task_id)
                 if task_id in self.tokens:
                     self.tokens.pop(task_id)
+                if task_id in self.thread_ids:
+                    self.thread_ids.pop(task_id)
                 logger.debug(f"Unregistered all callbacks for task {task_id}")
             else:
                 if callback in self.callbacks[task_id]:
@@ -261,6 +296,20 @@ class WebhookHandler:
                     self.callbacks.pop(task_id)
                     if task_id in self.tokens:
                         self.tokens.pop(task_id)
+                    if task_id in self.thread_ids:
+                        self.thread_ids.pop(task_id)
+    
+    def get_thread_id(self, task_id: str) -> Optional[str]:
+        """
+        Get the thread ID associated with a task
+        
+        Args:
+            task_id: ID of the task
+            
+        Returns:
+            Thread ID if found, None otherwise
+        """
+        return self.thread_ids.get(task_id)
     
     async def start(self):
         """Start the webhook server"""

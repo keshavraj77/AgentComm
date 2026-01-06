@@ -25,7 +25,8 @@ class AgentComm:
         agent: Agent,
         use_sdk: bool = True,
         webhook_handler: Optional[WebhookHandler] = None,
-        ngrok_manager: Optional[NgrokManager] = None
+        ngrok_manager: Optional[NgrokManager] = None,
+        thread_id: Optional[str] = None
     ):
         """
         Initialize the agent communication wrapper
@@ -35,11 +36,13 @@ class AgentComm:
             use_sdk: Whether to use the official A2A SDK (default: True)
             webhook_handler: Optional webhook handler for push notifications
             ngrok_manager: Optional ngrok manager for secure tunneling
+            thread_id: Optional thread ID for associating webhook callbacks
         """
         self.agent = agent
         self.use_sdk = use_sdk
         self.webhook_handler = webhook_handler
         self.ngrok_manager = ngrok_manager
+        self.thread_id = thread_id
 
         if use_sdk:
             self.a2a_sdk_client = A2ASDKClientWrapper()
@@ -221,11 +224,26 @@ class AgentComm:
         try:
             response_text = ""
             last_task_state = None
+            task_id = None
+            webhook_queue = None
 
             if self.use_sdk and self.a2a_sdk_client:
                 # Use the official A2A SDK
                 logger.info(f"Using A2A SDK to send streaming message")
                 push_config = self._generate_push_notification_config()
+                
+                # Define webhook callback to handle push notifications
+                async def webhook_callback(task_data: Dict[str, Any]):
+                    """Handle incoming webhook notifications"""
+                    logger.info(f"Webhook callback received task data")
+                    if webhook_queue:
+                        await webhook_queue.put(task_data)
+                
+                # If push notifications are enabled, create a queue for webhook data
+                if push_config and self.webhook_handler:
+                    webhook_queue = asyncio.Queue()
+                    logger.info(f"Created webhook queue for push notifications")
+                
                 async for response in self.a2a_sdk_client.send_streaming_message(
                     agent_url=self.agent.url,
                     message=message,
@@ -280,6 +298,20 @@ class AgentComm:
                             # Log task details
                             task_state = 'unknown'
                             if task:
+                                # Store task ID for webhook callback registration
+                                if hasattr(task, 'id') and task.id and not task_id:
+                                    task_id = task.id
+                                    # Register webhook callback for this task
+                                    if webhook_queue and self.webhook_handler and push_config:
+                                        token = push_config.get('token')
+                                        self.webhook_handler.register_callback(
+                                            task_id,
+                                            webhook_callback,
+                                            token,
+                                            thread_id=self.thread_id
+                                        )
+                                        logger.info(f"Registered webhook callback for task {task_id} in thread {self.thread_id}")
+                                
                                 logger.info(f"Task ID: {task.id if hasattr(task, 'id') else 'unknown'}")
                                 task_state = task.status.state if hasattr(task, 'status') and hasattr(task.status, 'state') else 'unknown'
                                 logger.info(f"Task status: {task_state}")
@@ -453,6 +485,90 @@ class AgentComm:
                             self.context_id = result.context_id
                         elif isinstance(result, dict) and "contextId" in result:
                             self.context_id = result["contextId"]
+                
+                # After initial stream completes, check for webhook notifications
+                if webhook_queue and task_id:
+                    logger.info(f"Initial stream complete, waiting for webhook notifications for task {task_id}")
+                    
+                    # Wait for webhook notifications with timeout
+                    timeout_seconds = 300  # 5 minutes timeout
+                    start_time = asyncio.get_event_loop().time()
+                    
+                    while True:
+                        try:
+                            # Check if we've exceeded timeout
+                            if asyncio.get_event_loop().time() - start_time > timeout_seconds:
+                                logger.warning(f"Webhook notification timeout after {timeout_seconds}s")
+                                break
+                            
+                            # Wait for webhook notification with short timeout
+                            task_data = await asyncio.wait_for(webhook_queue.get(), timeout=1.0)
+                            logger.info(f"Received webhook notification for task {task_id}")
+                            
+                            # Process the webhook notification similar to regular responses
+                            chunk = ""
+                            
+                            # Extract text from task data
+                            if 'history' in task_data and isinstance(task_data['history'], list):
+                                # Get the last message from history (agent's response)
+                                for msg in reversed(task_data['history']):
+                                    if isinstance(msg, dict) and msg.get('role') == 'agent':
+                                        if 'parts' in msg and isinstance(msg['parts'], list):
+                                            for part in msg['parts']:
+                                                if isinstance(part, dict):
+                                                    if 'text' in part:
+                                                        chunk += part['text']
+                                                    elif 'content' in part:
+                                                        chunk += part['content']
+                                        break
+                            
+                            # Check task status
+                            if 'status' in task_data:
+                                status = task_data['status']
+                                state = status.get('state', '')
+                                logger.info(f"Webhook task state: {state}")
+                                
+                                # If completed, this is the final response
+                                if 'completed' in str(state).lower():
+                                    # Extract from artifacts
+                                    if 'artifacts' in task_data and isinstance(task_data['artifacts'], list):
+                                        chunk = ""  # Reset chunk for final response
+                                        for artifact in task_data['artifacts']:
+                                            if isinstance(artifact, dict) and 'parts' in artifact:
+                                                for part in artifact['parts']:
+                                                    if isinstance(part, dict):
+                                                        if 'text' in part:
+                                                            chunk += part['text']
+                                                        elif 'content' in part:
+                                                            chunk += part['content']
+                                    
+                                    if chunk:
+                                        logger.info(f"✓ Webhook final response: {chunk[:100]}...")
+                                        response_text += chunk
+                                        yield chunk
+                                    
+                                    # Unregister callback and break
+                                    self.webhook_handler.unregister_callback(task_id)
+                                    logger.info(f"Task completed, unregistered webhook callback")
+                                    break
+                            
+                            # Yield intermediate chunks if any
+                            if chunk:
+                                logger.info(f"✓ Webhook intermediate chunk: {chunk[:100]}...")
+                                response_text += chunk
+                                yield chunk
+                                
+                        except asyncio.TimeoutError:
+                            # No notification received in this interval, continue waiting
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error processing webhook notification: {e}", exc_info=True)
+                            break
+                    
+                    # Cleanup: unregister callback if still registered
+                    if task_id and self.webhook_handler:
+                        self.webhook_handler.unregister_callback(task_id)
+                        logger.info(f"Cleaned up webhook callback for task {task_id}")
 
             else:
                 # Use legacy client

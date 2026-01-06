@@ -68,6 +68,14 @@ class SessionManager:
 
     async def start(self):
         """Start the session manager and async components"""
+        # Start webhook handler if available
+        if self.webhook_handler:
+            logger.info("Starting webhook server...")
+            asyncio.create_task(self.webhook_handler.start())
+            # Give the server a moment to start
+            await asyncio.sleep(0.5)
+            logger.info(f"Webhook server started on {self.webhook_handler.host}:{self.webhook_handler.port}")
+
         # Start ngrok tunnel if ngrok manager is available
         if self.ngrok_manager:
             await self._start_ngrok_tunnel()
@@ -154,12 +162,7 @@ class SessionManager:
 
             self.current_entity_id = agent_id
             self.current_entity_type = "agent"
-            self.agent_comm = AgentComm(
-                agent,
-                webhook_handler=self.webhook_handler,
-                ngrok_manager=self.ngrok_manager
-            )
-
+            
             # Initialize threads dict for this agent if it doesn't exist
             if agent_id not in self.threads:
                 self.threads[agent_id] = {}
@@ -174,6 +177,14 @@ class SessionManager:
             else:
                 # Create a new thread
                 self.current_thread_id = self.create_thread(agent_id, "agent")
+            
+            # Create AgentComm with the current thread_id
+            self.agent_comm = AgentComm(
+                agent,
+                webhook_handler=self.webhook_handler,
+                ngrok_manager=self.ngrok_manager,
+                thread_id=self.current_thread_id
+            )
 
             return True
         except Exception as e:
