@@ -262,6 +262,7 @@ class AgentComm:
                         logger.info(f"Processing result of type: {type(result).__name__}")
                         logger.info(f"Result class module: {type(result).__module__}")
                         chunk = ""
+                        is_status_message = False
 
                         # Handle Message responses directly (not in tuple)
                         if type(result).__name__ == 'Message' and not isinstance(result, tuple):
@@ -374,6 +375,9 @@ class AgentComm:
                                             elif hasattr(part, 'text') and part.text:
                                                 chunk += part.text
                                                 logger.info(f"✓ Extracted text from submitted status: {part.text[:100]}...")
+                                    
+                                    if chunk:
+                                        is_status_message = True
 
                             # If task is completed, ONLY extract from artifacts (the final result)
                             # Don't include status messages in the final output
@@ -409,6 +413,7 @@ class AgentComm:
                                         if hasattr(task.status.message, 'parts'):
                                             logger.info(f"Status message has {len(task.status.message.parts)} parts!")
                                             for idx, part in enumerate(task.status.message.parts):
+                                                is_status_message = True
                                                 logger.info(f"Part {idx}: {part}")
                                                 logger.info(f"Part {idx} type: {type(part).__name__}")
 
@@ -468,10 +473,15 @@ class AgentComm:
                                 logger.info(f"Extracted content: {chunk[:100]}...")
 
                         if chunk:
-                            logger.info(f"✓✓✓ SUCCESS: Yielding chunk of length {len(chunk)}")
-                            logger.info(f"✓✓✓ Chunk preview: {chunk[:200]}...")
-                            response_text += chunk
-                            yield chunk
+                            if is_status_message:
+                                logger.info(f"✓✓✓ Yielding STATUS chunk of length {len(chunk)}")
+                                logger.info(f"✓✓✓ Status preview: {chunk[:200]}...")
+                                yield f"<<<STATUS>>>{chunk}"
+                            else:
+                                logger.info(f"✓✓✓ SUCCESS: Yielding CONTENT chunk of length {len(chunk)}")
+                                logger.info(f"✓✓✓ Chunk preview: {chunk[:200]}...")
+                                response_text += chunk
+                                yield chunk
                         else:
                             logger.warning(f"✗✗✗ PROBLEM: No chunk extracted from result")
                             logger.warning(f"✗✗✗ Result type was: {type(result).__name__}")

@@ -24,6 +24,8 @@ class SettingsDialog(QDialog):
     Dialog for configuring application settings
     """
     
+    settings_changed = pyqtSignal()
+    
     def __init__(
         self,
         agent_registry: AgentRegistry,
@@ -830,6 +832,7 @@ class SettingsDialog(QDialog):
 
                 StyledMessageBox.information(self, "Success", f"Agent {name} saved successfully")
                 logger.info(f"Agent {name} ({agent_id}) saved successfully")
+                self.settings_changed.emit()
             else:
                 StyledMessageBox.warning(self, "Error", f"Failed to save agent {name}")
                 logger.error(f"Failed to save agent {name} ({agent_id})")
@@ -894,6 +897,7 @@ class SettingsDialog(QDialog):
                 # Reload LLM router with new config
                 self.llm_router.reload_config()
                 StyledMessageBox.information(self, "Success", f"LLM {llm_id} configuration saved successfully")
+                self.settings_changed.emit()
             else:
                 StyledMessageBox.warning(self, "Error", f"Failed to save LLM {llm_id} configuration")
 
@@ -1007,6 +1011,7 @@ class SettingsDialog(QDialog):
             # Show appropriate message based on success
             if success:
                 StyledMessageBox.information(self, "Success", "All settings applied successfully")
+                self.settings_changed.emit()
             else:
                 StyledMessageBox.warning(self, "Error", "Failed to save some settings")
 

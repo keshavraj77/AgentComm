@@ -498,7 +498,39 @@ class MainWindow(QMainWindow):
         Open the settings dialog
         """
         settings_dialog = SettingsDialog(self.agent_registry, self.llm_router, self)
+        # Connect settings changed signal to reload configuration
+        settings_dialog.settings_changed.connect(self.reload_current_configuration)
         settings_dialog.exec()
+
+    def reload_current_configuration(self):
+        """
+        Reload the current configuration (agent or LLM)
+        """
+        logger.info("Settings changed, reloading current configuration...")
+        
+        # Determine current entity from session manager (source of truth)
+        entity_id = self.session_manager.current_entity_id
+        entity_type = self.session_manager.current_entity_type
+        
+        if not entity_id or not entity_type:
+            return
+            
+        # Get current thread ID
+        current_thread = self.session_manager.get_current_thread()
+        thread_id = current_thread.thread_id if current_thread else None
+        
+        # Re-select the entity to refresh configuration
+        # This updates the AgentComm instance in SessionManager with the new configuration
+        if entity_type == "agent":
+            logger.info(f"Reloading agent {entity_id} configuration")
+            self.session_manager.select_agent(entity_id, thread_id)
+            
+        elif entity_type == "llm":
+            logger.info(f"Reloading LLM {entity_id} configuration")
+            self.session_manager.select_llm(entity_id, thread_id)
+            
+        # Update status bar
+        self.status_bar.showMessage("Configuration reloaded")
     
     def show_about(self):
         """

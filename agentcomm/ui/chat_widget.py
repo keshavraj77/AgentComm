@@ -21,6 +21,7 @@ from PyQt6.QtGui import QTextCursor, QFont, QColor, QTextCharFormat
 
 from agentcomm.core.session_manager import SessionManager
 from agentcomm.llm.chat_history import ChatHistory, ChatMessage
+from agentcomm.ui.loading_indicator import LoadingIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -519,6 +520,10 @@ class ChatWidget(QWidget):
         self.chat_scroll_area.setWidget(self.chat_container)
         self.layout.addWidget(self.chat_scroll_area, 1)
 
+        # Loading Indicator (replaces status container)
+        self.loading_indicator = LoadingIndicator(self)
+        self.layout.addWidget(self.loading_indicator)
+
         # Create the input area
         self.input_layout = QHBoxLayout()
         self.input_layout.setContentsMargins(10, 10, 10, 10)
@@ -666,6 +671,9 @@ class ChatWidget(QWidget):
 
         # Clear the chat display
         self.clear_chat()
+        # Clear the chat display
+        self.clear_chat()
+        self.loading_indicator.stop_animation()
 
         # Load the chat history for the current thread
         self.load_chat_history()
@@ -773,6 +781,12 @@ class ChatWidget(QWidget):
         
         # Reset the streaming response
         self.streaming_response = ""
+        # Reset the streaming response
+        self.streaming_response = ""
+        
+        # Start loading animation
+        entity_type = "agent" if self.current_entity_type == "agent" else "llm"
+        self.loading_indicator.start_animation(entity_type)
         
         # Start the update timer
         self.update_timer.start(100)
@@ -831,6 +845,9 @@ class ChatWidget(QWidget):
         """
         Do final update of streaming message (must be called from main thread)
         """
+        # Ensure loading animation is stopped
+        self.loading_indicator.stop_animation()
+        
         self.update_streaming_message()
         self._finalize_streaming_message()
 
@@ -921,7 +938,7 @@ class ChatWidget(QWidget):
     def on_streaming_chunk_received(self, sender_id: str, chunk: str, message_type: str):
         """
         Handle a streaming chunk
-
+        
         Args:
             sender_id: ID of the sender
             chunk: Message chunk
@@ -929,11 +946,29 @@ class ChatWidget(QWidget):
         """
         # Only handle chunks from the current entity
         if self.current_entity_id == sender_id:
+            # Check for STATUS signal
+            if chunk.startswith("<<<STATUS>>>"):
+                status_text = chunk[12:]
+                logger.info(f"Received STATUS signal: {status_text}")
+                # We could show this in the loading indicator if we wanted to support custom status text
+                # For now, just logging it as we have generic fun phrases
+                return
+
             # Check for CLEAR signal to reset the streaming response
+            # Note: CLEAR just resets state, don't stop animation - wait for real content
             if chunk == "<<<CLEAR>>>":
                 logger.info("Received CLEAR signal - resetting streaming response")
                 self.streaming_response = ""
+                # Don't stop animation here - wait for actual content to arrive
                 return
+
+            # Stop loading animation when receiving real content
+            # Use thread-safe method via QMetaObject
+            if self.loading_indicator.isVisible():
+                QMetaObject.invokeMethod(
+                    self.loading_indicator, "stop_animation",
+                    Qt.ConnectionType.QueuedConnection
+                )
 
             # Append the chunk to the streaming response
             self.streaming_response += chunk
@@ -947,6 +982,11 @@ class ChatWidget(QWidget):
         Args:
             error_message: Error message
         """
+        # Add the error message to the chat display
+
+        # Stop loading animation on error
+        self.loading_indicator.stop_animation()
+        
         # Add the error message to the chat display
         self.add_message_widget(f"Error: {error_message}", "System")
     
