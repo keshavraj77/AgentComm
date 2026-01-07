@@ -6,6 +6,7 @@ Main entry point for the application
 
 import os
 import sys
+import signal
 import logging
 from pathlib import Path
 import asyncio
@@ -25,6 +26,7 @@ data_dir.mkdir(exist_ok=True)
 
 try:
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QTimer
     from agentcomm.ui.main_window import MainWindow
     from agentcomm.core.config_store import ConfigStore
     from agentcomm.core.session_manager import SessionManager
@@ -135,9 +137,28 @@ def main():
         app = QApplication(sys.argv)
         loop = qasync.QEventLoop(app)
         asyncio.set_event_loop(loop)
+
+        # Helper to allow Ctrl+C to work
+        # PyQt6 blocks signals, so we need a timer to let the interpreter run
+        # periodically to process signals
+        def sigint_handler(*args):
+            logger.info("Received SIGINT, shutting down...")
+            QApplication.quit()
+        
+        signal.signal(signal.SIGINT, sigint_handler)
+        
+        # Create a timer that fires every 500ms to yield control to Python
+        timer = QTimer()
+        timer.start(500)
+        timer.timeout.connect(lambda: None)
         
         with loop:
-            loop.run_until_complete(main_coro(app))
+            try:
+                loop.run_until_complete(main_coro(app))
+            except (KeyboardInterrupt, SystemExit):
+                logger.info("Application interrupted")
+            except Exception as e:
+                logger.error(f"Error in event loop: {e}")
             
     except Exception as e:
         logger.error(f"Error starting application: {e}")
