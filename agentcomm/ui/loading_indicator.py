@@ -24,110 +24,136 @@ from PyQt6.QtGui import (
 )
 
 
-class GlowingStar(QWidget):
+class MorphingIcon(QWidget):
     """
-    Custom widget that draws a glowing, rotating star that morphs from a dot.
+    Custom widget that animates: + (cross) → * (star with more lines) → ○ (circle)
+    The animation loops continuously.
     """
-    def __init__(self, parent=None, size=18):
+    def __init__(self, parent=None, size=20):
         super().__init__(parent)
         self.setFixedSize(size, size)
-        self._glow_intensity = 0.6
+        self._morph_phase = 0.0  # 0.0 = +, 0.5 = star, 1.0 = circle
         self._rotation = 0
-        self._morph_ratio = 0.0  # 0.0 = dot, 1.0 = star
 
-        # Morph in (Dot -> Star)
-        self.morph_in = QPropertyAnimation(self, b"morph_ratio")
-        self.morph_in.setDuration(800)
-        self.morph_in.setStartValue(0.0)
-        self.morph_in.setEndValue(1.0)
-        self.morph_in.setEasingCurve(QEasingCurve.Type.OutBack)
+        # Animation timer for smooth morphing
+        self.anim_timer = QTimer(self)
+        self.anim_timer.timeout.connect(self._update_animation)
+        self.anim_timer.setInterval(25)  # ~40 FPS
 
-        # Pulse/Glow loop
-        self.pulse_anim = QPropertyAnimation(self, b"glow_intensity")
-        self.pulse_anim.setDuration(1000)
-        self.pulse_anim.setStartValue(0.4)
-        self.pulse_anim.setEndValue(1.0)
-        self.pulse_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        self.pulse_anim.setLoopCount(-1)
-
-        # Rotation animation
-        self.rotate_timer = QTimer(self)
-        self.rotate_timer.timeout.connect(self._update_rotation)
-        self.rotate_timer.setInterval(20)  # ~50 FPS
+        # Animation state
+        self._phase_direction = 1  # 1 = forward, -1 = backward
+        self._phase_speed = 0.012
 
     @pyqtProperty(float)
-    def glow_intensity(self):
-        return self._glow_intensity
+    def morph_phase(self):
+        return self._morph_phase
 
-    @glow_intensity.setter
-    def glow_intensity(self, value):
-        self._glow_intensity = value
+    @morph_phase.setter
+    def morph_phase(self, value):
+        self._morph_phase = value
         self.update()
 
-    @pyqtProperty(float)
-    def morph_ratio(self):
-        return self._morph_ratio
+    def _update_animation(self):
+        # Update morph phase (oscillate between 0 and 1)
+        self._morph_phase += self._phase_speed * self._phase_direction
+        if self._morph_phase >= 1.0:
+            self._morph_phase = 1.0
+            self._phase_direction = -1
+        elif self._morph_phase <= 0.0:
+            self._morph_phase = 0.0
+            self._phase_direction = 1
 
-    @morph_ratio.setter
-    def morph_ratio(self, value):
-        self._morph_ratio = value
-        self.update()
+        # Slow rotation
+        self._rotation = (self._rotation + 0.8) % 360
 
-    def _update_rotation(self):
-        self._rotation = (self._rotation + 2) % 360
         self.update()
 
     def start(self):
-        self._morph_ratio = 0.0
-        self.morph_in.start()
-        self.pulse_anim.start()
-        self.rotate_timer.start()
+        self._morph_phase = 0.0
+        self._phase_direction = 1
+        self._rotation = 0
+        self.anim_timer.start()
 
     def stop(self):
-        self.morph_in.stop()
-        self.pulse_anim.stop()
-        self.rotate_timer.stop()
-        self._morph_ratio = 0.0
+        self.anim_timer.stop()
+        self._morph_phase = 0.0
 
     def paintEvent(self, event):
         with QPainter(self) as painter:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
             cx, cy = self.width() / 2, self.height() / 2
-            radius = self.width() * 0.4
+            radius = self.width() * 0.38
 
-            # Move to center and rotate
             painter.translate(cx, cy)
-            if self._morph_ratio > 0.1:
-                painter.rotate(self._rotation * self._morph_ratio)
+            painter.rotate(self._rotation)
 
-            # Draw glow
-            gradient = QRadialGradient(0, 0, radius * 1.5)
-            color = QColor(251, 146, 60)  # Orange-400
-            color.setAlphaF(0.4 * self._glow_intensity)
-            gradient.setColorAt(0, color)
-            gradient.setColorAt(1, Qt.GlobalColor.transparent)
-            painter.setBrush(QBrush(gradient))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(int(-radius * 1.5), int(-radius * 1.5), int(radius * 3), int(radius * 3))
+            # Main color - high contrast orange
+            main_color = QColor(251, 146, 60)  # Orange-400
+            painter.setPen(QPen(main_color, 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
 
-            # Draw morphing shape (Dot -> Star)
-            star_color = QColor(230, 81, 0)  # Dark Orange
-            painter.setBrush(QBrush(star_color))
-            painter.setPen(QPen(star_color, 1))
+            # Phase 0.0-0.5: + morphs to * (4 lines → 8 lines)
+            # Phase 0.5-1.0: * morphs to ○ (8 lines → circle)
 
-            # Interpolate inner radius
-            inner_r_target = radius * 0.4
-            current_inner_r = radius - (radius - inner_r_target) * self._morph_ratio
+            if self._morph_phase < 0.5:
+                # + to * transition
+                # Start with 4 lines (cross), add diagonal lines
+                t = self._morph_phase * 2  # 0 to 1 for this phase
 
-            star_poly = QPolygonF()
-            for i in range(10):
-                angle = i * 36
-                r = radius if i % 2 == 0 else current_inner_r
-                rad = math.radians(angle - 90)
-                star_poly.append(QPointF(r * math.cos(rad), r * math.sin(rad)))
+                # Draw the main cross (always present)
+                line_len = radius * 0.9
 
-            painter.drawPolygon(star_poly)
+                # Vertical line
+                painter.drawLine(QPointF(0, -line_len), QPointF(0, line_len))
+                # Horizontal line
+                painter.drawLine(QPointF(-line_len, 0), QPointF(line_len, 0))
+
+                # Diagonal lines fade in
+                if t > 0.1:
+                    diag_len = line_len * min(1.0, (t - 0.1) / 0.6)
+                    diag_alpha = min(1.0, (t - 0.1) / 0.4)
+                    diag_color = QColor(251, 146, 60)
+                    diag_color.setAlphaF(diag_alpha)
+                    painter.setPen(QPen(diag_color, 2.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+
+                    # Diagonal lines at 45 degrees
+                    d = diag_len * 0.707  # cos(45) = sin(45) = 0.707
+                    painter.drawLine(QPointF(-d, -d), QPointF(d, d))
+                    painter.drawLine(QPointF(-d, d), QPointF(d, -d))
+
+            else:
+                # * to ○ transition
+                t = (self._morph_phase - 0.5) * 2  # 0 to 1 for this phase
+
+                # Number of lines decreases as we approach circle
+                # Line length shrinks, then becomes arc segments
+                line_len = radius * 0.9 * (1 - t * 0.3)
+
+                # Draw 8 lines that curve into a circle
+                num_points = 8
+                for i in range(num_points):
+                    angle = i * (360 / num_points)
+                    rad = math.radians(angle)
+
+                    # Start point moves outward as we approach circle
+                    inner_r = line_len * t * 0.7
+                    outer_r = line_len
+
+                    x1 = inner_r * math.cos(rad)
+                    y1 = inner_r * math.sin(rad)
+                    x2 = outer_r * math.cos(rad)
+                    y2 = outer_r * math.sin(rad)
+
+                    painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+
+                # Draw circle that fades in
+                if t > 0.3:
+                    circle_alpha = (t - 0.3) / 0.7
+                    circle_color = QColor(251, 146, 60)
+                    circle_color.setAlphaF(circle_alpha)
+                    painter.setPen(QPen(circle_color, 2.0))
+                    painter.drawEllipse(QPointF(0, 0), line_len * 0.85, line_len * 0.85)
 
 
 class FlowingTextLabel(QWidget):
@@ -287,8 +313,8 @@ class LoadingIndicator(QWidget):
         self.layout.setContentsMargins(20, 5, 20, 5)
         self.layout.setSpacing(12)
 
-        # Glowing Star Animation
-        self.star = GlowingStar(self, size=20)
+        # Morphing Icon Animation (+ → * → ○)
+        self.star = MorphingIcon(self, size=22)
         self.layout.addWidget(self.star)
 
         # Flowing text label (replaces static QLabel)
