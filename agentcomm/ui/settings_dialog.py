@@ -624,11 +624,19 @@ class SettingsDialog(QDialog):
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
 
+            max_tokens_input = QSpinBox()
+            max_tokens_input.setMinimum(1)
+            max_tokens_input.setMaximum(100000)
+            max_tokens_input.setSingleStep(100)
+            max_tokens_input.setValue(provider.default_params.get("max_tokens", 1000) if hasattr(provider, "default_params") else 1000)
+            form_layout.addRow("Max Tokens:", max_tokens_input)
+
             # Store references for batch saving
             self.llm_inputs[llm_id] = {
                 "api_key": api_key_input,
                 "default_model": model_input,
-                "temperature": temperature_input
+                "temperature": temperature_input,
+                "max_tokens": max_tokens_input
             }
 
             # Add the save button
@@ -638,7 +646,8 @@ class SettingsDialog(QDialog):
                 {
                     "api_key": api_key_input.text(),
                     "default_model": model_input.text(),
-                    "temperature": temperature_input.value()
+                    "temperature": temperature_input.value(),
+                    "max_tokens": max_tokens_input.value()
                 }
             ))
             form_layout.addRow("", save_button)
@@ -658,11 +667,19 @@ class SettingsDialog(QDialog):
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
 
+            max_tokens_input = QSpinBox()
+            max_tokens_input.setMinimum(1)
+            max_tokens_input.setMaximum(100000)
+            max_tokens_input.setSingleStep(100)
+            max_tokens_input.setValue(provider.default_params.get("max_tokens", 1000) if hasattr(provider, "default_params") else 1000)
+            form_layout.addRow("Max Tokens:", max_tokens_input)
+
             # Store references for batch saving
             self.llm_inputs[llm_id] = {
                 "api_key": api_key_input,
                 "default_model": model_input,
-                "temperature": temperature_input
+                "temperature": temperature_input,
+                "max_tokens": max_tokens_input
             }
 
             # Add the save button
@@ -672,7 +689,8 @@ class SettingsDialog(QDialog):
                 {
                     "api_key": api_key_input.text(),
                     "default_model": model_input.text(),
-                    "temperature": temperature_input.value()
+                    "temperature": temperature_input.value(),
+                    "max_tokens": max_tokens_input.value()
                 }
             ))
             form_layout.addRow("", save_button)
@@ -692,11 +710,19 @@ class SettingsDialog(QDialog):
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
 
+            max_tokens_input = QSpinBox()
+            max_tokens_input.setMinimum(1)
+            max_tokens_input.setMaximum(100000)
+            max_tokens_input.setSingleStep(100)
+            max_tokens_input.setValue(provider.default_params.get("max_tokens", 1000) if hasattr(provider, "default_params") else 1000)
+            form_layout.addRow("Max Tokens:", max_tokens_input)
+
             # Store references for batch saving
             self.llm_inputs[llm_id] = {
                 "api_key": api_key_input,
                 "default_model": model_input,
-                "temperature": temperature_input
+                "temperature": temperature_input,
+                "max_tokens": max_tokens_input
             }
 
             # Add the save button
@@ -706,7 +732,8 @@ class SettingsDialog(QDialog):
                 {
                     "api_key": api_key_input.text(),
                     "default_model": model_input.text(),
-                    "temperature": temperature_input.value()
+                    "temperature": temperature_input.value(),
+                    "max_tokens": max_tokens_input.value()
                 }
             ))
             form_layout.addRow("", save_button)
@@ -725,11 +752,19 @@ class SettingsDialog(QDialog):
             temperature_input.setValue(provider.temperature if hasattr(provider, "temperature") else 0.7)
             form_layout.addRow("Temperature:", temperature_input)
 
+            max_tokens_input = QSpinBox()
+            max_tokens_input.setMinimum(1)
+            max_tokens_input.setMaximum(100000)
+            max_tokens_input.setSingleStep(100)
+            max_tokens_input.setValue(provider.default_params.get("max_tokens", 1000) if hasattr(provider, "default_params") else 1000)
+            form_layout.addRow("Max Tokens:", max_tokens_input)
+
             # Store references for batch saving
             self.llm_inputs[llm_id] = {
                 "host": host_input,
                 "default_model": model_input,
-                "temperature": temperature_input
+                "temperature": temperature_input,
+                "max_tokens": max_tokens_input
             }
 
             # Add the save button
@@ -739,7 +774,8 @@ class SettingsDialog(QDialog):
                 {
                     "host": host_input.text(),
                     "default_model": model_input.text(),
-                    "temperature": temperature_input.value()
+                    "temperature": temperature_input.value(),
+                    "max_tokens": max_tokens_input.value()
                 }
             ))
             form_layout.addRow("", save_button)
@@ -943,13 +979,15 @@ class SettingsDialog(QDialog):
                     config = {
                         "host": inputs["host"].text(),
                         "default_model": inputs["default_model"].text(),
-                        "temperature": inputs["temperature"].value()
+                        "temperature": inputs["temperature"].value(),
+                        "max_tokens": inputs["max_tokens"].value()
                     }
                 else:
                     config = {
                         "api_key": inputs["api_key"].text(),
                         "default_model": inputs["default_model"].text(),
-                        "temperature": inputs["temperature"].value()
+                        "temperature": inputs["temperature"].value(),
+                        "max_tokens": inputs["max_tokens"].value()
                     }
 
                 # Update config in config_store
