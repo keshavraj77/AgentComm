@@ -620,6 +620,44 @@ class ChatWidget(QWidget):
         # Create a timer for updating the UI
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.update_streaming_message)
+
+        # Setup scroll behavior
+        self.stick_to_bottom = True
+        self.setup_scroll_behavior()
+
+    def setup_scroll_behavior(self):
+        """
+        Setup auto-scrolling behavior
+        """
+        scrollbar = self.chat_scroll_area.verticalScrollBar()
+        scrollbar.rangeChanged.connect(self.on_scroll_range_changed)
+        scrollbar.valueChanged.connect(self.on_scroll_value_changed)
+
+    def on_scroll_range_changed(self, min_val, max_val):
+        """
+        Handle scroll range changes (e.g. content added)
+        """
+        if self.stick_to_bottom:
+            self.chat_scroll_area.verticalScrollBar().setValue(max_val)
+
+    def on_scroll_value_changed(self, value):
+        """
+        Handle manual scroll changes
+        """
+        scrollbar = self.chat_scroll_area.verticalScrollBar()
+        max_val = scrollbar.maximum()
+        
+        # If user is near the bottom, enable sticky mode
+        # If user scrolls up, disable sticky mode
+        if value >= max_val - 20:  # 20px tolerance
+            self.stick_to_bottom = True
+        else:
+            # Only disable if the range didn't just change (which might cause a value change)
+            # We can't easily distinguish, but this basic logic is usually sufficient
+            # If we are programmatically scrolling, we've set stick_to_bottom=True anyway
+            if self.chat_scroll_area.verticalScrollBar().isSliderDown(): # User is dragging
+                 self.stick_to_bottom = False
+
         
     def _thread_safe_message_callback(self, sender_id: str, message: str, message_type: str):
         """Thread-safe wrapper for message callback"""
@@ -756,10 +794,7 @@ class ChatWidget(QWidget):
             # Also recalculate on resize
             QTimer.singleShot(100, recalculate_height)
 
-        # Scroll to the bottom
-        self.chat_scroll_area.verticalScrollBar().setValue(
-            self.chat_scroll_area.verticalScrollBar().maximum()
-        )
+        # Scroll to the bottom is now handled by rangeChanged signal if stick_to_bottom is True
     
     def send_message(self):
         """
@@ -774,6 +809,7 @@ class ChatWidget(QWidget):
         self.message_input.clear()
         
         # Add the message to the chat display
+        self.stick_to_bottom = True  # Force scroll to bottom for user message
         self.add_message_widget(message, "You", True)
         
         # Emit the message sent signal
@@ -1120,10 +1156,7 @@ class ChatWidget(QWidget):
 
             self.chat_layout.addWidget(container)
 
-        # Scroll to the bottom
-        self.chat_scroll_area.verticalScrollBar().setValue(
-            self.chat_scroll_area.verticalScrollBar().maximum()
-        )
+        # Scroll to the bottom is now handled by rangeChanged signal if stick_to_bottom is True
 
     def delete_current_thread(self):
         """
