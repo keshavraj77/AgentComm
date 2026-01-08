@@ -12,8 +12,16 @@ from agentcomm.agents.a2a_client import A2AClient, Message
 from agentcomm.agents.a2a_sdk_client import A2ASDKClientWrapper
 from agentcomm.agents.webhook_handler import WebhookHandler
 from agentcomm.agents.ngrok_manager import NgrokManager
+from agentcomm.agents.task_state import TaskState, TaskStateResult
 
 logger = logging.getLogger(__name__)
+
+
+# Default status messages for active states
+DEFAULT_STATUS_MESSAGES = {
+    TaskState.SUBMITTED: "Task submitted, waiting for agent...",
+    TaskState.WORKING: "Agent is processing...",
+}
 
 class AgentComm:
     """
@@ -109,6 +117,208 @@ class AgentComm:
                     push_config["authentication"]["credentials"] = credentials
 
         return push_config
+
+    def _parse_task_state(self, task: Any) -> TaskState:
+        """
+        Parse task state from a task object.
+
+        Args:
+            task: Task object from A2A SDK
+
+        Returns:
+            TaskState enum value
+        """
+        if not task or not hasattr(task, 'status') or not hasattr(task.status, 'state'):
+            return TaskState.UNSPECIFIED
+
+        state_str = str(task.status.state)
+        return TaskState.from_string(state_str)
+
+    def _extract_content_from_artifacts(self, task: Any) -> str:
+        """
+        Extract text content from task artifacts.
+
+        Used for terminal and interrupted states where artifacts contain the final response.
+
+        Args:
+            task: Task object from A2A SDK
+
+        Returns:
+            Extracted text content
+        """
+        content = ""
+
+        if not task or not hasattr(task, 'artifacts') or not task.artifacts:
+            return content
+
+        for artifact in task.artifacts:
+            if not hasattr(artifact, 'parts') or not artifact.parts:
+                continue
+
+            for part in artifact.parts:
+                # Handle Part wrapper with root attribute (SDK format)
+                if hasattr(part, 'root'):
+                    if hasattr(part.root, 'text') and part.root.text:
+                        content += part.root.text
+                # Direct text/content attributes
+                elif hasattr(part, 'text') and part.text:
+                    content += part.text
+                elif hasattr(part, 'content') and part.content:
+                    content += part.content
+
+        return content
+
+    def _extract_status_message(self, task: Any) -> Optional[str]:
+        """
+        Extract status message from task.status.message.
+
+        Used for active states where status message shows progress.
+
+        Args:
+            task: Task object from A2A SDK
+
+        Returns:
+            Status message text or None
+        """
+        if not task or not hasattr(task, 'status'):
+            return None
+
+        status = task.status
+        if not hasattr(status, 'message') or not status.message:
+            return None
+
+        message = status.message
+        text = ""
+
+        # Check if message has parts
+        if hasattr(message, 'parts') and message.parts:
+            for part in message.parts:
+                # Handle Part wrapper with root attribute
+                if hasattr(part, 'root'):
+                    if hasattr(part.root, 'text') and part.root.text:
+                        text += part.root.text
+                # Direct text attribute
+                elif hasattr(part, 'text') and part.text:
+                    text += part.text
+
+        return text if text else None
+
+    def _extract_event_artifact_content(self, event: Any) -> str:
+        """
+        Extract content from an event's artifact (incremental updates).
+
+        Args:
+            event: Event object from A2A SDK streaming
+
+        Returns:
+            Extracted text content
+        """
+        content = ""
+
+        if not event or not hasattr(event, 'artifact') or not event.artifact:
+            return content
+
+        artifact = event.artifact
+        if not hasattr(artifact, 'parts') or not artifact.parts:
+            return content
+
+        for part in artifact.parts:
+            # Handle Part wrapper with root attribute
+            if hasattr(part, 'root'):
+                if hasattr(part.root, 'text') and part.root.text:
+                    content += part.root.text
+            elif hasattr(part, 'text') and part.text:
+                content += part.text
+            elif hasattr(part, 'content') and part.content:
+                content += part.content
+
+        return content
+
+    def _process_task_response(self, task: Any, event: Any = None, last_state: Optional[TaskState] = None) -> TaskStateResult:
+        """
+        Process a task response and determine how to handle it.
+
+        Args:
+            task: Task object from A2A SDK
+            event: Optional event object for streaming updates
+            last_state: Previous task state for detecting transitions
+
+        Returns:
+            TaskStateResult with appropriate content and handling instructions
+        """
+        state = self._parse_task_state(task)
+        task_id = task.id if task and hasattr(task, 'id') else None
+
+        logger.info(f"Processing task response - State: {state.value}, Task ID: {task_id}")
+
+        # Check for state transition to completed (send CLEAR signal)
+        is_transition_to_terminal = (
+            state.is_terminal() and
+            last_state is not None and
+            not last_state.is_terminal()
+        )
+
+        if state.is_terminal():
+            # Terminal states: extract content from artifacts
+            content = self._extract_content_from_artifacts(task)
+            logger.info(f"Terminal state ({state.value}) - Extracted {len(content)} chars from artifacts")
+
+            return TaskStateResult(
+                state=state,
+                content=content,
+                is_final=True,
+                should_poll=False,
+                task_id=task_id,
+            )
+
+        elif state.is_interrupted():
+            # Interrupted states (input-required, auth-required): stream content as-is
+            # First try artifacts, then status message
+            content = self._extract_content_from_artifacts(task)
+            if not content:
+                content = self._extract_status_message(task) or ""
+
+            logger.info(f"Interrupted state ({state.value}) - Extracted {len(content)} chars")
+
+            return TaskStateResult(
+                state=state,
+                content=content,
+                is_final=True,  # Interrupted states are "final" in that user needs to respond
+                should_poll=False,
+                task_id=task_id,
+            )
+
+        elif state.is_active():
+            # Active states (submitted, working): show status message
+            status_msg = self._extract_status_message(task)
+
+            # Use default message if no agent-provided status
+            if not status_msg:
+                status_msg = DEFAULT_STATUS_MESSAGES.get(state, "Processing...")
+
+            logger.info(f"Active state ({state.value}) - Status: {status_msg}")
+
+            # Check for incremental content from event
+            event_content = self._extract_event_artifact_content(event) if event else ""
+
+            return TaskStateResult(
+                state=state,
+                content=event_content if event_content else None,
+                status_message=status_msg,
+                should_poll=True,  # Need to poll/wait for completion
+                is_final=False,
+                task_id=task_id,
+            )
+
+        else:
+            # Unknown/unspecified state
+            logger.warning(f"Unknown task state: {state.value}")
+            return TaskStateResult(
+                state=state,
+                should_poll=True,
+                is_final=False,
+                task_id=task_id,
+            )
 
     async def send_message(self, message: str) -> str:
         """
@@ -213,37 +423,46 @@ class AgentComm:
     
     async def send_message_stream(self, message: str) -> AsyncGenerator[str, None]:
         """
-        Send a message to the agent and stream the response
+        Send a message to the agent and stream the response.
+
+        Task State Handling:
+        - Terminal states (completed, failed, cancelled, rejected): Stream content from artifacts
+        - Interrupted states (input-required, auth-required): Stream content as-is (prompts for user)
+        - Active states (submitted, working): Emit status messages, poll/wait for completion
 
         Args:
             message: Message to send
 
         Yields:
-            Response chunks from the agent
+            Response chunks from the agent. Special signals:
+            - "<<<STATUS>>>text": Status message to show in loading indicator
+            - "<<<CLEAR>>>": Clear previous streaming content (on state transition)
         """
         try:
             response_text = ""
-            last_task_state = None
-            task_id = None
-            webhook_queue = None
+            yielded_any_content = False
+            last_state: Optional[TaskState] = None
+            task_id: Optional[str] = None
+            webhook_queue: Optional[asyncio.Queue] = None
+            last_status_message: Optional[str] = None
 
             if self.use_sdk and self.a2a_sdk_client:
-                # Use the official A2A SDK
-                logger.info(f"Using A2A SDK to send streaming message")
+                logger.info("Using A2A SDK to send streaming message")
                 push_config = self._generate_push_notification_config()
-                
-                # Define webhook callback to handle push notifications
+
+                # Webhook callback for push notifications
                 async def webhook_callback(task_data: Dict[str, Any]):
                     """Handle incoming webhook notifications"""
-                    logger.info(f"Webhook callback received task data")
+                    logger.info("Webhook callback received task data")
                     if webhook_queue:
                         await webhook_queue.put(task_data)
-                
-                # If push notifications are enabled, create a queue for webhook data
+
+                # Create webhook queue if push notifications are enabled
                 if push_config and self.webhook_handler:
                     webhook_queue = asyncio.Queue()
-                    logger.info(f"Created webhook queue for push notifications")
-                
+                    logger.info("Created webhook queue for push notifications")
+
+                # Process streaming responses
                 async for response in self.a2a_sdk_client.send_streaming_message(
                     agent_url=self.agent.url,
                     message=message,
@@ -254,334 +473,116 @@ class AgentComm:
                     context_id=self.context_id,
                     push_notification_config=push_config
                 ):
-                    logger.info(f"=== AgentComm received response ===")
-                    logger.info(f"Response keys: {response.keys() if isinstance(response, dict) else 'not a dict'}")
+                    if "result" not in response:
+                        continue
 
-                    if "result" in response:
-                        result = response["result"]
-                        logger.info(f"Processing result of type: {type(result).__name__}")
-                        logger.info(f"Result class module: {type(result).__module__}")
-                        chunk = ""
-                        is_status_message = False
+                    result = response["result"]
+                    logger.debug(f"Processing result of type: {type(result).__name__}")
 
-                        # Handle Message responses directly (not in tuple)
-                        if type(result).__name__ == 'Message' and not isinstance(result, tuple):
-                            logger.info(f"Result is a Message object")
-                            if hasattr(result, 'model_dump'):
-                                logger.info(f"Message dump: {result.model_dump()}")
-
-                            if hasattr(result, 'parts') and result.parts:
-                                logger.info(f"Message has {len(result.parts)} parts")
-                                for idx, part in enumerate(result.parts):
-                                    logger.info(f"Part {idx} type: {type(part).__name__}")
-                                    # Handle Part wrapper with root attribute
-                                    if hasattr(part, 'root'):
-                                        if hasattr(part.root, 'text') and part.root.text:
-                                            chunk += part.root.text
-                                            logger.info(f"✓ Extracted text from message part root: {part.root.text[:100]}...")
-                                    # Direct text/content attributes
-                                    elif hasattr(part, 'text') and part.text:
-                                        chunk += part.text
-                                        logger.info(f"✓ Extracted text from message part: {part.text[:100]}...")
-                                    elif hasattr(part, 'content') and part.content:
-                                        chunk += part.content
-                                        logger.info(f"✓ Extracted content from message part: {part.content[:100]}...")
-
-                        # Handle tuple responses (Task, Event or None)
-                        elif isinstance(result, tuple):
-                            logger.info(f"Result is tuple with {len(result)} elements")
-                            task = result[0] if len(result) > 0 else None
-                            event = result[1] if len(result) > 1 else None
-
-                            logger.info(f"Task type: {type(task).__name__ if task else 'None'}")
-                            logger.info(f"Event type: {type(event).__name__ if event else 'None'}")
-
-                            # Log task details
-                            task_state = 'unknown'
-                            if task:
-                                # Store task ID for webhook callback registration
-                                if hasattr(task, 'id') and task.id and not task_id:
-                                    task_id = task.id
-                                    # Register webhook callback for this task
-                                    if webhook_queue and self.webhook_handler and push_config:
-                                        token = push_config.get('token')
-                                        self.webhook_handler.register_callback(
-                                            task_id,
-                                            webhook_callback,
-                                            token,
-                                            thread_id=self.thread_id
-                                        )
-                                        logger.info(f"Registered webhook callback for task {task_id} in thread {self.thread_id}")
-                                
-                                logger.info(f"Task ID: {task.id if hasattr(task, 'id') else 'unknown'}")
-                                task_state = task.status.state if hasattr(task, 'status') and hasattr(task.status, 'state') else 'unknown'
-                                logger.info(f"Task status: {task_state}")
-
-                                # Log status details
-                                if hasattr(task, 'status'):
-                                    logger.info(f"Status attributes: {[a for a in dir(task.status) if not a.startswith('_')]}")
-                                    if hasattr(task.status, 'message') and task.status.message:
-                                        logger.info(f"Status message: {task.status.message}")
-
-                                # Dump the full task for debugging
-                                if hasattr(task, 'model_dump'):
-                                    task_dict = task.model_dump()
-                                    logger.info(f"Full task dump: {task_dict}")
-
-                            # Log event details
-                            if event:
-                                logger.info(f"Event type: {type(event).__name__}")
-                                if hasattr(event, 'model_dump'):
-                                    event_dict = event.model_dump()
-                                    logger.info(f"Full event dump: {event_dict}")
-
-                            # Check task states
-                            is_completed = str(task_state) == 'TaskState.completed'
-                            is_submitted = str(task_state) == 'TaskState.submitted'
-
-                            # If task just transitioned to completed, send a clear signal
-                            if is_completed and last_task_state != 'TaskState.completed':
-                                logger.info(f"Task transitioned to completed - sending CLEAR signal")
-                                yield "<<<CLEAR>>>"
-                                response_text = ""  # Reset accumulated text
-
-                            # Update the last known state
-                            last_task_state = str(task_state)
-
-                            # Handle submitted state - extract status message (polling instructions)
-                            if is_submitted:
-                                logger.info(f"Task submitted - extracting status message for polling instructions")
-                                
-                                # Check if task has artifacts (some agents send initial content in artifacts even when submitted)
-                                if task and hasattr(task, 'artifacts') and task.artifacts:
-                                    logger.info(f"Task has {len(task.artifacts)} artifacts in submitted state")
-                                    for idx, artifact in enumerate(task.artifacts):
-                                        if hasattr(artifact, 'parts') and artifact.parts:
-                                            for part in artifact.parts:
-                                                if hasattr(part, 'root') and hasattr(part.root, 'text') and part.root.text:
-                                                    chunk += part.root.text
-                                                    logger.info(f"✓ Extracted text from submitted artifact: {part.root.text[:100]}...")
-                                                elif hasattr(part, 'text') and part.text:
-                                                    chunk += part.text
-                                                    logger.info(f"✓ Extracted text from submitted artifact: {part.text[:100]}...")
-                                
-                                # Also check status message for polling instructions
-                                if task and hasattr(task, 'status') and hasattr(task.status, 'message') and task.status.message:
-                                    if hasattr(task.status.message, 'parts') and task.status.message.parts:
-                                        for part in task.status.message.parts:
-                                            if hasattr(part, 'root') and hasattr(part.root, 'text') and part.root.text:
-                                                chunk += part.root.text
-                                                logger.info(f"✓ Extracted text from submitted status: {part.root.text[:100]}...")
-                                            elif hasattr(part, 'text') and part.text:
-                                                chunk += part.text
-                                                logger.info(f"✓ Extracted text from submitted status: {part.text[:100]}...")
-                                    
-                                    if chunk:
-                                        is_status_message = True
-
-                            # If task is completed, ONLY extract from artifacts (the final result)
-                            # Don't include status messages in the final output
-                            elif is_completed:
-                                logger.info(f"Task completed - extracting ONLY from artifacts")
-                                if task and hasattr(task, 'artifacts') and task.artifacts:
-                                    logger.info(f"Task has {len(task.artifacts)} artifacts")
-                                    for idx, artifact in enumerate(task.artifacts):
-                                        logger.info(f"Artifact {idx}: {artifact}")
-                                        if hasattr(artifact, 'parts') and artifact.parts:
-                                            for part_idx, part in enumerate(artifact.parts):
-                                                logger.info(f"  Part {part_idx} type: {type(part).__name__}")
-                                                # Handle Part wrapper with root attribute
-                                                if hasattr(part, 'root'):
-                                                    if hasattr(part.root, 'text') and part.root.text:
-                                                        chunk += part.root.text
-                                                        logger.info(f"  ✓ Extracted text from artifact part root: {part.root.text[:100]}...")
-                                                # Direct text/content attributes
-                                                elif hasattr(part, 'text') and part.text:
-                                                    chunk += part.text
-                                                    logger.info(f"  ✓ Extracted text from artifact part: {part.text[:100]}...")
-                                                elif hasattr(part, 'content') and part.content:
-                                                    chunk += part.content
-                                                    logger.info(f"  ✓ Extracted content from artifact part: {part.content[:100]}...")
-                            else:
-                                # Task is in progress - extract status messages and/or artifact updates
-                                logger.info(f"Task in progress - extracting status messages and artifact updates")
-
-                                # Extract status messages (e.g., "Processing...")
-                                if task and hasattr(task, 'status'):
-                                    if hasattr(task.status, 'message') and task.status.message:
-                                        # Check if status message is a Message object with parts
-                                        if hasattr(task.status.message, 'parts'):
-                                            logger.info(f"Status message has {len(task.status.message.parts)} parts!")
-                                            for idx, part in enumerate(task.status.message.parts):
-                                                is_status_message = True
-                                                logger.info(f"Part {idx}: {part}")
-                                                logger.info(f"Part {idx} type: {type(part).__name__}")
-
-                                                # Handle Part wrapper with root attribute
-                                                if hasattr(part, 'root'):
-                                                    logger.info(f"Part has 'root' attribute: {type(part.root).__name__}")
-                                                    if hasattr(part.root, 'text') and part.root.text:
-                                                        chunk += part.root.text
-                                                        logger.info(f"✓ Extracted text from status message root: {part.root.text[:100]}...")
-                                                # Direct text attribute
-                                                elif hasattr(part, 'text') and part.text:
-                                                    chunk += part.text
-                                                    logger.info(f"✓ Extracted text from status message: {part.text[:100]}...")
-
-                                # Extract artifact updates (only from event, not task, to avoid duplicates)
-                                if event and hasattr(event, 'artifact') and event.artifact:
-                                    logger.info(f"Event has artifact update - extracting incremental update")
-                                    if hasattr(event.artifact, 'parts'):
-                                        for part in event.artifact.parts:
-                                            # Handle Part wrapper with root attribute
-                                            if hasattr(part, 'root'):
-                                                if hasattr(part.root, 'text') and part.root.text:
-                                                    chunk += part.root.text
-                                                    logger.info(f"✓ Extracted text from event artifact root: {part.root.text[:100]}...")
-                                            # Direct text/content attributes
-                                            elif hasattr(part, 'text') and part.text:
-                                                chunk += part.text
-                                                logger.info(f"✓ Extracted text from event artifact: {part.text[:100]}...")
-                                            elif hasattr(part, 'content') and part.content:
-                                                chunk += part.content
-                                                logger.info(f"✓ Extracted content from event artifact: {part.content[:100]}...")
-
-                            if not chunk and task:
-                                logger.info(f"Task has no artifacts (artifacts={task.artifacts if hasattr(task, 'artifacts') else 'N/A'})")
-
-                        # Handle Message responses
-                        elif hasattr(result, 'parts'):
-                            logger.info(f"Result has 'parts' attribute with {len(result.parts)} parts")
-                            for part in result.parts:
-                                if hasattr(part, 'text'):
-                                    chunk += part.text
-                                    logger.debug(f"Extracted text from part: {part.text[:100]}...")
-
-                        # Handle dict responses
-                        elif isinstance(result, dict):
-                            logger.info(f"Result is dict with keys: {result.keys()}")
-                            if "content" in result:
-                                chunk = result["content"]
-                            elif "text" in result:
-                                chunk = result["text"]
-
-                        # Try to extract from other object types
-                        else:
-                            logger.info(f"Result attributes: {[a for a in dir(result) if not a.startswith('_')]}")
-                            if hasattr(result, 'content'):
-                                chunk = result.content
-                                logger.info(f"Extracted content: {chunk[:100]}...")
-
+                    # Handle direct Message responses (not task-based)
+                    if type(result).__name__ == 'Message' and not isinstance(result, tuple):
+                        chunk = self._extract_message_content(result)
                         if chunk:
-                            if is_status_message:
-                                logger.info(f"✓✓✓ Yielding STATUS chunk of length {len(chunk)}")
-                                logger.info(f"✓✓✓ Status preview: {chunk[:200]}...")
-                                yield f"<<<STATUS>>>{chunk}"
-                            else:
-                                logger.info(f"✓✓✓ SUCCESS: Yielding CONTENT chunk of length {len(chunk)}")
-                                logger.info(f"✓✓✓ Chunk preview: {chunk[:200]}...")
-                                response_text += chunk
-                                yield chunk
-                        else:
-                            logger.warning(f"✗✗✗ PROBLEM: No chunk extracted from result")
-                            logger.warning(f"✗✗✗ Result type was: {type(result).__name__}")
+                            response_text += chunk
+                            yield chunk
+                            yielded_any_content = True
+                        continue
+
+                    # Handle tuple responses (Task, Event)
+                    if isinstance(result, tuple):
+                        task = result[0] if len(result) > 0 else None
+                        event = result[1] if len(result) > 1 else None
+
+                        if not task:
+                            continue
+
+                        # Register webhook callback on first task response
+                        if hasattr(task, 'id') and task.id and not task_id:
+                            task_id = task.id
+                            self.last_task_id = task_id
+                            if webhook_queue and self.webhook_handler and push_config:
+                                token = push_config.get('token')
+                                self.webhook_handler.register_callback(
+                                    task_id,
+                                    webhook_callback,
+                                    token,
+                                    thread_id=self.thread_id
+                                )
+                                logger.info(f"Registered webhook callback for task {task_id}")
+
+                        # Process task response using clean state handling
+                        task_result = self._process_task_response(task, event, last_state)
+
+                        # Check for state transition to terminal (send CLEAR signal)
+                        if (task_result.state.is_terminal() and
+                            last_state is not None and
+                            not last_state.is_terminal()):
+                            logger.info("State transitioned to terminal - sending CLEAR signal")
+                            yield "<<<CLEAR>>>"
+                            response_text = ""
+
+                        # Update last state
+                        last_state = task_result.state
+
+                        # Handle based on state category
+                        if task_result.state.should_stream_content():
+                            # Terminal or interrupted states: stream content
+                            if task_result.content:
+                                response_text += task_result.content
+                                yield task_result.content
+                                yielded_any_content = True
+                                logger.info(f"Yielded content ({len(task_result.content)} chars) for state {task_result.state.value}")
+
+                        elif task_result.state.should_show_status():
+                            # Active states: emit status message
+                            if task_result.status_message and task_result.status_message != last_status_message:
+                                last_status_message = task_result.status_message
+                                yield f"<<<STATUS>>>{task_result.status_message}"
+                                yielded_any_content = True
+                                logger.info(f"Yielded status: {task_result.status_message}")
+
+                            # Also yield any incremental content from events
+                            if task_result.content:
+                                response_text += task_result.content
+                                yield task_result.content
+                                yielded_any_content = True
 
                         # Extract context ID
-                        if isinstance(result, tuple) and len(result) > 0:
-                            task = result[0]
-                            if hasattr(task, 'context_id'):
-                                self.context_id = task.context_id
-                        elif hasattr(result, 'context_id'):
-                            self.context_id = result.context_id
-                        elif isinstance(result, dict) and "contextId" in result:
+                        if hasattr(task, 'context_id') and task.context_id:
+                            self.context_id = task.context_id
+
+                    # Handle dict responses (legacy format)
+                    elif isinstance(result, dict):
+                        chunk = result.get("content") or result.get("text") or ""
+                        if chunk:
+                            response_text += chunk
+                            yield chunk
+                            yielded_any_content = True
+
+                        if "contextId" in result:
                             self.context_id = result["contextId"]
-                
-                # After initial stream completes, check for webhook notifications
-                if webhook_queue and task_id:
-                    logger.info(f"Initial stream complete, waiting for webhook notifications for task {task_id}")
-                    
-                    # Wait for webhook notifications with timeout
-                    timeout_seconds = 300  # 5 minutes timeout
-                    start_time = asyncio.get_event_loop().time()
-                    
-                    while True:
-                        try:
-                            # Check if we've exceeded timeout
-                            if asyncio.get_event_loop().time() - start_time > timeout_seconds:
-                                logger.warning(f"Webhook notification timeout after {timeout_seconds}s")
-                                break
-                            
-                            # Wait for webhook notification with short timeout
-                            task_data = await asyncio.wait_for(webhook_queue.get(), timeout=1.0)
-                            logger.info(f"Received webhook notification for task {task_id}")
-                            
-                            # Process the webhook notification similar to regular responses
-                            chunk = ""
-                            
-                            # Extract text from task data
-                            if 'history' in task_data and isinstance(task_data['history'], list):
-                                # Get the last message from history (agent's response)
-                                for msg in reversed(task_data['history']):
-                                    if isinstance(msg, dict) and msg.get('role') == 'agent':
-                                        if 'parts' in msg and isinstance(msg['parts'], list):
-                                            for part in msg['parts']:
-                                                if isinstance(part, dict):
-                                                    if 'text' in part:
-                                                        chunk += part['text']
-                                                    elif 'content' in part:
-                                                        chunk += part['content']
-                                        break
-                            
-                            # Check task status
-                            if 'status' in task_data:
-                                status = task_data['status']
-                                state = status.get('state', '')
-                                logger.info(f"Webhook task state: {state}")
-                                
-                                # If completed, this is the final response
-                                if 'completed' in str(state).lower():
-                                    # Extract from artifacts
-                                    if 'artifacts' in task_data and isinstance(task_data['artifacts'], list):
-                                        chunk = ""  # Reset chunk for final response
-                                        for artifact in task_data['artifacts']:
-                                            if isinstance(artifact, dict) and 'parts' in artifact:
-                                                for part in artifact['parts']:
-                                                    if isinstance(part, dict):
-                                                        if 'text' in part:
-                                                            chunk += part['text']
-                                                        elif 'content' in part:
-                                                            chunk += part['content']
-                                    
-                                    if chunk:
-                                        logger.info(f"✓ Webhook final response: {chunk[:100]}...")
-                                        response_text += chunk
-                                        yield chunk
-                                    
-                                    # Unregister callback and break
-                                    self.webhook_handler.unregister_callback(task_id)
-                                    logger.info(f"Task completed, unregistered webhook callback")
-                                    break
-                            
-                            # Yield intermediate chunks if any
-                            if chunk:
-                                logger.info(f"✓ Webhook intermediate chunk: {chunk[:100]}...")
-                                response_text += chunk
-                                yield chunk
-                                
-                        except asyncio.TimeoutError:
-                            # No notification received in this interval, continue waiting
-                            continue
-                        except Exception as e:
-                            logger.error(f"Error processing webhook notification: {e}", exc_info=True)
-                            break
-                    
-                    # Cleanup: unregister callback if still registered
-                    if task_id and self.webhook_handler:
-                        self.webhook_handler.unregister_callback(task_id)
-                        logger.info(f"Cleaned up webhook callback for task {task_id}")
+
+                # After initial stream, wait for webhook notifications if in active state
+                if webhook_queue and task_id and last_state and last_state.is_active():
+                    logger.info(f"Stream complete in active state ({last_state.value}), waiting for webhook")
+                    async for chunk in self._wait_for_webhook_completion(
+                        webhook_queue, task_id, last_state
+                    ):
+                        if chunk.startswith("<<<"):
+                            yield chunk
+                            yielded_any_content = True
+                        else:
+                            response_text += chunk
+                            yield chunk
+                            yielded_any_content = True
+
+                # Cleanup webhook callback
+                if task_id and self.webhook_handler:
+                    self.webhook_handler.unregister_callback(task_id)
+                    logger.info(f"Cleaned up webhook callback for task {task_id}")
 
             else:
-                # Use legacy client
+                # Legacy client path
                 msg = Message(
                     content=message,
                     content_type="text/plain",
@@ -602,33 +603,30 @@ class AgentComm:
                         result = response["result"]
                         chunk = ""
 
-                        if "kind" in result and result["kind"] == "message":
-                            if "content" in result:
-                                chunk = result["content"]
+                        if result.get("kind") == "message":
+                            chunk = result.get("content", "")
 
-                        elif "kind" in result and result["kind"] == "task":
-                            self.last_task_id = result["id"]
-
-                            if "artifacts" in result and isinstance(result["artifacts"], list):
-                                for artifact in result["artifacts"]:
-                                    if "parts" in artifact and isinstance(artifact["parts"], list):
-                                        for part in artifact["parts"]:
-                                            if "content" in part:
-                                                chunk += part["content"]
+                        elif result.get("kind") == "task":
+                            self.last_task_id = result.get("id")
+                            # Extract from artifacts
+                            for artifact in result.get("artifacts", []):
+                                for part in artifact.get("parts", []):
+                                    chunk += part.get("content", "")
 
                         if chunk:
                             response_text += chunk
                             yield chunk
+                            yielded_any_content = True
 
                     if "context" in response and "id" in response["context"]:
                         self.context_id = response["context"]["id"]
 
             self.last_response = response_text
 
-            # If we didn't get any response, send a generic error message
-            if not response_text:
+            # Fallback error message if nothing yielded
+            if not response_text and not yielded_any_content:
                 error_msg = "Unable to get a response from the agent. Please try again."
-                logger.warning(f"No response text received from agent. Sending generic error message.")
+                logger.warning("No response received from agent")
                 yield error_msg
                 self.last_response = error_msg
 
@@ -637,6 +635,110 @@ class AgentComm:
             error_msg = f"Error communicating with agent: {str(e)}. Please try again."
             yield error_msg
             self.last_response = error_msg
+
+    def _extract_message_content(self, message: Any) -> str:
+        """Extract text content from a Message object."""
+        content = ""
+        if hasattr(message, 'parts') and message.parts:
+            for part in message.parts:
+                if hasattr(part, 'root') and hasattr(part.root, 'text') and part.root.text:
+                    content += part.root.text
+                elif hasattr(part, 'text') and part.text:
+                    content += part.text
+                elif hasattr(part, 'content') and part.content:
+                    content += part.content
+        return content
+
+    async def _wait_for_webhook_completion(
+        self,
+        webhook_queue: asyncio.Queue,
+        task_id: str,
+        initial_state: TaskState
+    ) -> AsyncGenerator[str, None]:
+        """
+        Wait for webhook notifications until task reaches terminal/interrupted state.
+
+        Args:
+            webhook_queue: Queue receiving webhook notifications
+            task_id: Task ID to track
+            initial_state: Initial task state when entering this wait
+
+        Yields:
+            Content chunks and status signals
+        """
+        timeout_seconds = 300  # 5 minutes
+        start_time = asyncio.get_event_loop().time()
+        last_status: Optional[str] = None
+
+        while True:
+            try:
+                # Check timeout
+                if asyncio.get_event_loop().time() - start_time > timeout_seconds:
+                    logger.warning(f"Webhook timeout after {timeout_seconds}s")
+                    break
+
+                # Wait for webhook notification
+                task_data = await asyncio.wait_for(webhook_queue.get(), timeout=1.0)
+                logger.info(f"Received webhook notification for task {task_id}")
+
+                # Parse state from webhook data
+                state_str = task_data.get('status', {}).get('state', '')
+                state = TaskState.from_string(state_str)
+                logger.info(f"Webhook task state: {state.value}")
+
+                if state.is_terminal():
+                    # Terminal state: extract final content from artifacts
+                    yield "<<<CLEAR>>>"
+                    content = self._extract_webhook_artifacts(task_data)
+                    if content:
+                        logger.info(f"Webhook final response: {len(content)} chars")
+                        yield content
+                    break
+
+                elif state.is_interrupted():
+                    # Interrupted state: extract content (user prompt)
+                    content = self._extract_webhook_artifacts(task_data)
+                    if not content:
+                        content = self._extract_webhook_status_message(task_data)
+                    if content:
+                        yield content
+                    break
+
+                elif state.is_active():
+                    # Active state: emit status message
+                    status_msg = self._extract_webhook_status_message(task_data)
+                    if status_msg and status_msg != last_status:
+                        last_status = status_msg
+                        yield f"<<<STATUS>>>{status_msg}"
+
+            except asyncio.TimeoutError:
+                # No notification yet, continue waiting
+                continue
+            except Exception as e:
+                logger.error(f"Error processing webhook: {e}", exc_info=True)
+                break
+
+    def _extract_webhook_artifacts(self, task_data: Dict[str, Any]) -> str:
+        """Extract content from webhook task data artifacts."""
+        content = ""
+        for artifact in task_data.get('artifacts', []):
+            if isinstance(artifact, dict):
+                for part in artifact.get('parts', []):
+                    if isinstance(part, dict):
+                        content += part.get('text', '') or part.get('content', '')
+        return content
+
+    def _extract_webhook_status_message(self, task_data: Dict[str, Any]) -> Optional[str]:
+        """Extract status message from webhook task data."""
+        status = task_data.get('status', {})
+        message = status.get('message', {})
+        if isinstance(message, dict):
+            for part in message.get('parts', []):
+                if isinstance(part, dict):
+                    text = part.get('text', '') or part.get('content', '')
+                    if text:
+                        return text
+        return None
     
     async def get_last_response(self) -> str:
         """

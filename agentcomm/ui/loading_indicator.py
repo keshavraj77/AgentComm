@@ -4,20 +4,24 @@ Loading Indicator Widget for A2A Client
 
 import random
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import (
-    Qt, QTimer, QPropertyAnimation, QEasingCurve, 
+    Qt, QTimer, QPropertyAnimation, QEasingCurve,
     QAbstractAnimation, QSequentialAnimationGroup, pyqtSlot
 )
 from PyQt6.QtGui import QColor, QPalette
 
 class LoadingIndicator(QWidget):
     """
-    Animated loading widget with fun rotating phrases
+    Animated loading widget with fun rotating phrases.
+
+    Supports two modes:
+    1. Default mode: Rotates through fun phrases automatically
+    2. Custom status mode: Shows agent-provided status message (overrides rotation)
     """
-    
+
     # Phrase sets for different entity types
     LLM_PHRASES = [
         ("🧠", "Neural networks firing..."),
@@ -36,7 +40,7 @@ class LoadingIndicator(QWidget):
         ("🎪", "Juggling the data..."),
         ("🌈", "Chasing rainbows..."),
     ]
-    
+
     A2A_PHRASES = [
         ("🤖", "Agent is on it..."),
         ("🔗", "Connecting the dots..."),
@@ -54,19 +58,21 @@ class LoadingIndicator(QWidget):
         ("🎬", "Action! Rolling..."),
         ("🍿", "Making this interesting..."),
     ]
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        
+
         self.setFixedHeight(60)
         self.current_phrases = self.LLM_PHRASES
         self.aborted = False
-        
+        self.custom_status_mode = False  # When True, shows agent-provided status
+        self.custom_status_text = None
+
         # Main layout
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(20, 5, 20, 5)
         self.layout.setSpacing(15)
-        
+
         # Icon label
         self.icon_label = QLabel("🧠")
         self.icon_label.setStyleSheet("""
@@ -76,14 +82,14 @@ class LoadingIndicator(QWidget):
             }
         """)
         self.layout.addWidget(self.icon_label)
-        
+
         # Text container for vertical stacking of message + dots
         text_container = QWidget()
         text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
         text_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        
+
         # Message label
         self.message_label = QLabel("Thinking...")
         self.message_label.setStyleSheet("""
@@ -95,7 +101,7 @@ class LoadingIndicator(QWidget):
             }
         """)
         text_layout.addWidget(self.message_label)
-        
+
         # Dots label
         self.dots_label = QLabel("...")
         self.dots_label.setStyleSheet("""
@@ -108,30 +114,30 @@ class LoadingIndicator(QWidget):
             }
         """)
         text_layout.addWidget(self.dots_label)
-        
+
         self.layout.addWidget(text_container)
         self.layout.addStretch()
-        
+
         # Setup opacity effect for fade transitions
         self.opacity_effect = QGraphicsOpacityEffect(self)
         self.message_label.setGraphicsEffect(self.opacity_effect)
-        
+
         # Phrase rotation timer
         self.phrase_timer = QTimer(self)
         self.phrase_timer.timeout.connect(self._rotate_phrase)
         self.phrase_timer.setInterval(1500)  # Rotate every 1.5s
-        
+
         # Dots animation timer
         self.dots_timer = QTimer(self)
         self.dots_timer.timeout.connect(self._animate_dots)
         self.dots_timer.setInterval(400)  # Update dots every 400ms
         self.dot_count = 0
-        
+
         # Fade animation
         self.fade_anim = QPropertyAnimation(self.opacity_effect, b"opacity")
         self.fade_anim.setDuration(500)
         self.fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
-        
+
         # Initial hidden state
         self.hide()
         
@@ -166,11 +172,15 @@ class LoadingIndicator(QWidget):
         """
         if self.aborted:
             return  # Already stopped
-            
+
         self.aborted = True
         self.phrase_timer.stop()
         self.dots_timer.stop()
-        
+
+        # Clear custom status mode
+        self.custom_status_mode = False
+        self.custom_status_text = None
+
         # Just hide immediately for cleaner transition
         self.hide()
         
@@ -179,20 +189,72 @@ class LoadingIndicator(QWidget):
         icon, text = random.choice(self.current_phrases)
         self.icon_label.setText(icon)
         self.message_label.setText(text)
-        
+
+    def _animate_dots(self):
+        """Animate the dots ... -> . -> .. -> ..."""
+        self.dot_count = (self.dot_count + 1) % 4
+        # Use spaces to keep width constant-ish
+        text = "." * (self.dot_count if self.dot_count > 0 else 1)
+        self.dots_label.setText(text)
+
+    @pyqtSlot(str)
+    @pyqtSlot(str, str)
+    def set_custom_status(self, status_text: str, icon: str = "⏳"):
+        """
+        Set a custom status message from the agent.
+
+        This overrides the rotating phrases and shows the agent-provided status.
+        The status will remain until cleared or a new status is set.
+
+        Args:
+            status_text: The status message to display
+            icon: Optional icon to show (default: hourglass)
+        """
+        self.custom_status_mode = True
+        self.custom_status_text = status_text
+
+        # Stop phrase rotation when showing custom status
+        self.phrase_timer.stop()
+
+        # Update the display
+        self.icon_label.setText(icon)
+        self.message_label.setText(status_text)
+        self.opacity_effect.setOpacity(1.0)
+
+        # Make sure we're visible
+        if not self.isVisible():
+            self.show()
+
+    @pyqtSlot()
+    def clear_custom_status(self):
+        """
+        Clear the custom status and return to rotating phrases.
+        """
+        self.custom_status_mode = False
+        self.custom_status_text = None
+
+        # Resume phrase rotation if still animating
+        if not self.aborted:
+            self._set_random_phrase()
+            self.phrase_timer.start()
+
     def _rotate_phrase(self):
         """Rotate to a new random phrase with fade transition"""
         if self.aborted:
             return
-            
+
+        # Don't rotate if in custom status mode
+        if self.custom_status_mode:
+            return
+
         # Fade out
         fade_out = QPropertyAnimation(self.opacity_effect, b"opacity")
         fade_out.setDuration(300)
         fade_out.setStartValue(1.0)
         fade_out.setEndValue(0.0)
-        
+
         def on_fade_out_finished():
-            if self.aborted:
+            if self.aborted or self.custom_status_mode:
                 return
             self._set_random_phrase()
             # Fade in
@@ -203,15 +265,8 @@ class LoadingIndicator(QWidget):
             fade_in.start()
             # Keep reference to avoid garbage collection
             self._fade_in_anim = fade_in
-            
+
         fade_out.finished.connect(on_fade_out_finished)
         fade_out.start()
         # Keep reference
         self._fade_out_anim = fade_out
-        
-    def _animate_dots(self):
-        """Animate the dots ... -> . -> .. -> ..."""
-        self.dot_count = (self.dot_count + 1) % 4
-        # Use spaces to keep width constant-ish
-        text = "." * (self.dot_count if self.dot_count > 0 else 1)
-        self.dots_label.setText(text)

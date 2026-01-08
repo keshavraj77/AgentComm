@@ -938,20 +938,39 @@ class ChatWidget(QWidget):
     def on_streaming_chunk_received(self, sender_id: str, chunk: str, message_type: str):
         """
         Handle a streaming chunk
-        
+
         Args:
             sender_id: ID of the sender
             chunk: Message chunk
             message_type: Type of the message
+
+        Special signals:
+            - "<<<STATUS>>>text": Update loading indicator with agent status message
+            - "<<<CLEAR>>>": Clear streaming response (on state transition)
         """
         # Only handle chunks from the current entity
         if self.current_entity_id == sender_id:
-            # Check for STATUS signal
+            # Check for STATUS signal - update loading indicator with custom status
             if chunk.startswith("<<<STATUS>>>"):
                 status_text = chunk[12:]
                 logger.info(f"Received STATUS signal: {status_text}")
-                # We could show this in the loading indicator if we wanted to support custom status text
-                # For now, just logging it as we have generic fun phrases
+
+                # Update the loading indicator with the agent's status message
+                # This overrides the default rotating phrases
+                QMetaObject.invokeMethod(
+                    self.loading_indicator, "set_custom_status",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, status_text)
+                )
+
+                # Make sure loading indicator is visible
+                if not self.loading_indicator.isVisible():
+                    entity_type = "agent" if self.current_entity_type == "agent" else "llm"
+                    QMetaObject.invokeMethod(
+                        self.loading_indicator, "start_animation",
+                        Qt.ConnectionType.QueuedConnection,
+                        Q_ARG(str, entity_type)
+                    )
                 return
 
             # Check for CLEAR signal to reset the streaming response
@@ -959,6 +978,12 @@ class ChatWidget(QWidget):
             if chunk == "<<<CLEAR>>>":
                 logger.info("Received CLEAR signal - resetting streaming response")
                 self.streaming_response = ""
+
+                # Clear custom status when state transitions
+                QMetaObject.invokeMethod(
+                    self.loading_indicator, "clear_custom_status",
+                    Qt.ConnectionType.QueuedConnection
+                )
                 # Don't stop animation here - wait for actual content to arrive
                 return
 
