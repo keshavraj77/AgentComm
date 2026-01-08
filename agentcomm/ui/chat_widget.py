@@ -13,7 +13,7 @@ from pygments.lexers import get_lexer_by_name, guess_lexer
 from pygments.formatters import HtmlFormatter
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QTextBrowser, QLineEdit,
     QPushButton, QScrollArea, QLabel, QSplitter, QFrame, QComboBox, QInputDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QMetaObject, Q_ARG
@@ -358,16 +358,17 @@ class MessageWidget(QFrame):
 
             layout.addWidget(message_label)
         else:
-            # QTextEdit for AI messages (needed for streaming updates)
-            message_text = QTextEdit()
+            # QTextBrowser for AI messages (supports clickable links + streaming updates)
+            message_text = QTextBrowser()
             message_text.setReadOnly(True)
+            message_text.setOpenExternalLinks(True)  # Enable clickable links
             # Convert markdown to HTML and display
             html_content = markdown_to_html(message)
             message_text.setHtml(html_content)
             message_text.setFrameStyle(QFrame.Shape.NoFrame)
 
             # Enable word wrapping
-            message_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+            message_text.setLineWrapMode(QTextBrowser.LineWrapMode.WidgetWidth)
             from PyQt6.QtGui import QTextOption
             message_text.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
 
@@ -778,10 +779,10 @@ class ChatWidget(QWidget):
         self.chat_layout.addWidget(container)
 
         # For AI messages, schedule a height recalculation after the widget is rendered
-        # This ensures the QTextEdit has the correct width for proper height calculation
+        # This ensures the QTextBrowser has the correct width for proper height calculation
         if not is_user:
             def recalculate_height():
-                text_edit = message_widget.findChild(QTextEdit)
+                text_edit = message_widget.findChild(QTextBrowser)
                 if text_edit:
                     # Force document to recalculate layout with current width
                     text_edit.document().setTextWidth(text_edit.viewport().width())
@@ -912,7 +913,7 @@ class ChatWidget(QWidget):
                     widget = item.widget()
                     if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
                         # Update the widget with the final streaming response
-                        message_text = widget.findChild(QTextEdit)
+                        message_text = widget.findChild(QTextBrowser)
                         if message_text and self.streaming_response:
                             # Convert markdown to HTML and display
                             html_content = markdown_to_html(self.streaming_response)
@@ -1122,7 +1123,7 @@ class ChatWidget(QWidget):
 
         if streaming_widget:
             # Update the existing widget
-            message_text = streaming_widget.findChild(QTextEdit)
+            message_text = streaming_widget.findChild(QTextBrowser)
             if message_text:
                 # Convert markdown to HTML and display
                 html_content = markdown_to_html(self.streaming_response)
