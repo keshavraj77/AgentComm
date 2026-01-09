@@ -3,6 +3,7 @@
 Chat Widget for A2A Client
 """
 
+import re
 import logging
 import asyncio
 import threading
@@ -26,6 +27,132 @@ from agentcomm.ui.loading_indicator import LoadingIndicator
 logger = logging.getLogger(__name__)
 
 
+def preprocess_code_blocks(text: str) -> str:
+    """
+    Preprocess text to fix malformed code blocks.
+
+    Handles:
+    - Curly/smart quotes used instead of backticks
+    - Missing newlines around code fences
+    - Language identifier followed immediately by code (```gopackage main)
+    - Text before code fence on same line (Here is code:```go)
+    """
+    # Replace curly/smart quotes that might be used as backticks
+    text = text.replace('\u2018', "'")  # Left single quote
+    text = text.replace('\u2019', "'")  # Right single quote
+    text = text.replace('\u201C', '"')  # Left double quote
+    text = text.replace('\u201D', '"')  # Right double quote
+    text = text.replace('\u0060', '`')  # Grave accent
+    text = text.replace('\u00B4', '`')  # Acute accent
+
+    # Known programming language identifiers for code fences
+    KNOWN_LANGUAGES = {
+        'python', 'py', 'javascript', 'js', 'typescript', 'ts', 'java', 'c', 'cpp',
+        'c++', 'csharp', 'cs', 'go', 'golang', 'rust', 'rs', 'ruby', 'rb', 'php',
+        'swift', 'kotlin', 'scala', 'perl', 'r', 'sql', 'html', 'css', 'scss',
+        'sass', 'less', 'xml', 'json', 'yaml', 'yml', 'toml', 'ini', 'bash', 'sh',
+        'shell', 'zsh', 'fish', 'powershell', 'ps1', 'dockerfile', 'docker',
+        'makefile', 'make', 'cmake', 'lua', 'vim', 'markdown', 'md', 'text', 'txt',
+        'plaintext', 'diff', 'git', 'graphql', 'protobuf', 'proto', 'terraform',
+        'tf', 'hcl', 'nginx', 'apache', 'jsx', 'tsx', 'vue', 'svelte', 'elm',
+        'haskell', 'hs', 'elixir', 'ex', 'erlang', 'erl', 'clojure', 'clj',
+        'lisp', 'scheme', 'ocaml', 'ml', 'fsharp', 'fs', 'dart', 'julia', 'jl',
+        'zig', 'nim', 'crystal', 'objectivec', 'objc', 'groovy', 'gradle',
+    }
+
+    lines = text.split('\n')
+    result = []
+    in_code_block = False
+
+    for line in lines:
+        # Look for ``` anywhere in the line
+        if '```' in line and not in_code_block:
+            fence_pos = line.find('```')
+
+            # Handle content before the fence
+            before_fence = line[:fence_pos]
+            after_fence = line[fence_pos + 3:]  # After ```
+
+            # If there's content before the fence, add it as a separate line
+            if before_fence.strip():
+                result.append(before_fence)
+
+            # Parse language identifier and any code that follows
+            # Match: optional language, then optional content
+            lang = ""
+            code_content = after_fence
+
+            if after_fence:
+                # Try to extract a known language identifier
+                # Check if the start matches any known language
+                lower_after = after_fence.lower()
+                matched_lang = None
+
+                # Sort by length descending to match longer languages first
+                # e.g., "javascript" before "java", "typescript" before "ts"
+                for known_lang in sorted(KNOWN_LANGUAGES, key=len, reverse=True):
+                    if lower_after.startswith(known_lang):
+                        rest = after_fence[len(known_lang):]
+                        # For known languages, always accept even if code follows
+                        # immediately (this handles ```gopackage main)
+                        matched_lang = after_fence[:len(known_lang)]
+                        code_content = rest
+                        break
+
+                if matched_lang:
+                    lang = matched_lang
+                else:
+                    # No known language found
+                    # Check for generic alphanumeric language id followed by whitespace/end
+                    lang_match = re.match(r'^([a-zA-Z][a-zA-Z0-9_+-]*)', after_fence)
+                    if lang_match:
+                        potential_lang = lang_match.group(1)
+                        rest = after_fence[len(potential_lang):]
+                        # Only treat as language if followed by whitespace or end
+                        # This prevents treating "unknownlangcode" as language "unknownlangcode"
+                        if not rest or rest[0].isspace():
+                            lang = potential_lang
+                            code_content = rest
+                        else:
+                            # Looks like code without a language identifier
+                            code_content = after_fence
+                    else:
+                        # No alphanumeric start - treat rest as code
+                        code_content = after_fence
+
+            # Add the code fence line
+            result.append('```' + lang)
+
+            # If there's code content, add it on a new line
+            if code_content.strip():
+                result.append(code_content.lstrip())
+
+            in_code_block = True
+
+        # Check for closing code fence
+        elif '```' in line and in_code_block:
+            fence_pos = line.find('```')
+            before_fence = line[:fence_pos]
+            after_fence = line[fence_pos + 3:]
+
+            # Add any code before the closing fence
+            if before_fence.strip():
+                result.append(before_fence)
+
+            # Add the closing fence
+            result.append('```')
+            in_code_block = False
+
+            # Add any content after the closing fence
+            if after_fence.strip():
+                result.append(after_fence)
+
+        else:
+            result.append(line)
+
+    return '\n'.join(result)
+
+
 def markdown_to_html(text: str) -> str:
     """
     Convert Markdown text to styled HTML
@@ -36,8 +163,24 @@ def markdown_to_html(text: str) -> str:
     Returns:
         HTML formatted text with styling
     """
+    # Preprocess to fix malformed code blocks
+    text = preprocess_code_blocks(text)
+
+    # Configure codehilite for syntax highlighting with pygments
+    codehilite_config = {
+        'codehilite': {
+            'guess_lang': True,  # Guess language if not specified
+            'css_class': 'codehilite',
+            'linenums': False,
+            'use_pygments': True,
+        }
+    }
+
     # Convert markdown to HTML
-    md = markdown.Markdown(extensions=['fenced_code', 'codehilite', 'tables', 'nl2br'])
+    md = markdown.Markdown(
+        extensions=['fenced_code', 'codehilite', 'tables', 'nl2br'],
+        extension_configs=codehilite_config
+    )
     html = md.convert(text)
 
     # Add custom CSS styling with syntax highlighting
@@ -114,9 +257,10 @@ def markdown_to_html(text: str) -> str:
 
         /* Variables and identifiers */
         .codehilite .n {{ color: #9cdcfe; }}  /* variable name */
-        .codehilite .nx {{ color: #9cdcfe; }}  /* variable (JS) */
+        .codehilite .nx {{ color: #9cdcfe; }}  /* variable/identifier (Go, JS) */
         .codehilite .na {{ color: #9cdcfe; }}  /* attribute name */
         .codehilite .bp {{ color: #4ec9b0; }}  /* built-in pseudo (self, this, True, False) */
+        .codehilite .w {{ color: #d4d4d4; }}   /* whitespace */
 
         /* Strings */
         .codehilite .s {{ color: #ce9178; }}   /* string */
@@ -358,61 +502,192 @@ class MessageWidget(QFrame):
 
             layout.addWidget(message_label)
         else:
-            # QTextBrowser for AI messages (supports clickable links + streaming updates)
-            message_text = QTextBrowser()
-            message_text.setReadOnly(True)
-            message_text.setOpenExternalLinks(True)  # Enable clickable links
-            # Convert markdown to HTML and display
-            html_content = markdown_to_html(message)
-            message_text.setHtml(html_content)
-            message_text.setFrameStyle(QFrame.Shape.NoFrame)
+            # AI messages: Mixed content (Text + Code Blocks)
+            self.content_layout = QVBoxLayout()
+            self.content_layout.setContentsMargins(0, 0, 0, 0)
+            self.content_layout.setSpacing(8)
+            layout.addLayout(self.content_layout)
+            
+            # Keep track of blocks to minimize re-rendering
+            self.blocks = []
+            
+            # Initial render
+            self.update_content(message)
 
-            # Enable word wrapping
-            message_text.setLineWrapMode(QTextBrowser.LineWrapMode.WidgetWidth)
-            from PyQt6.QtGui import QTextOption
-            message_text.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+    def update_content(self, message: str):
+        """
+        Update the message content (for streaming)
+        Smartly updates only what changed
+        """
+        from agentcomm.ui.code_block import CodeBlockWidget
+        
+        # Preprocess message to fix malformed code blocks (e.g. standardizing fences)
+        # This is critical for streaming where fences might be on the same line as text
+        processed_message = preprocess_code_blocks(message)
+        
+        # Parse message into blocks
+        # Returns list of dicts: {'type': 'text'|'code', 'content': str, 'lang': str}
+        new_blocks_data = self.parse_message(processed_message)
+        
+        # If we have more blocks than before, add them
+        while len(self.blocks) < len(new_blocks_data):
+            block_data = new_blocks_data[len(self.blocks)]
+            self.add_block(block_data)
+            
+        # Update existing blocks
+        for i, block_data in enumerate(new_blocks_data):
+            widget = self.blocks[i]
+            if block_data['type'] == 'code':
+                # Check if it's a CodeBlockWidget
+                if isinstance(widget, CodeBlockWidget):
+                    widget.update_content(block_data['content'], block_data.get('lang', ''))
+                else:
+                    # Type mismatch (shouldn't happen with append-only streaming usually, but handle it)
+                    self.replace_block(i, block_data)
+            else:
+                # Text block
+                if isinstance(widget, QTextBrowser):
+                    # Only update if content changed
+                    if widget.toPlainText() != block_data['content']:
+                         # Convert markdown to HTML and display
+                         html_content = markdown_to_html(block_data['content'])
+                         widget.setHtml(html_content)
+                         self.adjust_text_height(widget)
+                else:
+                    self.replace_block(i, block_data)
 
-            message_text.setStyleSheet("""
-                background-color: transparent;
-                color: #e5e7eb;
-                font-size: 14px;
-                padding: 0px;
-                margin: 0px;
-                border: none;
-            """)
-            message_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            message_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    def add_block(self, block_data):
+        """Add a new block widget"""
+        from agentcomm.ui.code_block import CodeBlockWidget
+        
+        if block_data['type'] == 'code':
+            widget = CodeBlockWidget(block_data['content'], block_data.get('lang', ''))
+            self.content_layout.addWidget(widget)
+            self.blocks.append(widget)
+        else:
+            widget = self.create_text_widget(block_data['content'])
+            self.content_layout.addWidget(widget)
+            self.blocks.append(widget)
 
-            # Remove ALL margins and padding for tighter fit
-            doc = message_text.document()
-            doc.setDocumentMargin(0)
-            message_text.setContentsMargins(0, 0, 0, 0)
-            message_text.setViewportMargins(0, 0, 0, 0)
+    def replace_block(self, index, block_data):
+        """Replace a widget at index"""
+        # Remove old
+        old_widget = self.blocks[index]
+        self.content_layout.removeWidget(old_widget)
+        old_widget.deleteLater()
+        
+        # Add new
+        from agentcomm.ui.code_block import CodeBlockWidget
+        if block_data['type'] == 'code':
+            widget = CodeBlockWidget(block_data['content'], block_data.get('lang', ''))
+        else:
+            widget = self.create_text_widget(block_data['content'])
+            
+        # Insert at index
+        self.content_layout.insertWidget(index, widget)
+        self.blocks[index] = widget
 
-            # Align text to top
-            from PyQt6.QtGui import QTextOption
-            message_text.document().setDefaultTextOption(QTextOption(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop))
+    def create_text_widget(self, content):
+        """Create a configured QTextBrowser for markdown text"""
+        message_text = QTextBrowser()
+        message_text.setReadOnly(True)
+        message_text.setOpenExternalLinks(True)
+        html_content = markdown_to_html(content)
+        message_text.setHtml(html_content)
+        message_text.setFrameStyle(QFrame.Shape.NoFrame)
 
-            # Set size policy to expand vertically as needed
-            from PyQt6.QtWidgets import QSizePolicy
-            message_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        message_text.setLineWrapMode(QTextBrowser.LineWrapMode.WidgetWidth)
+        from PyQt6.QtGui import QTextOption
+        message_text.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
 
-            # Connect document size changed signal to adjust height
-            def adjust_height():
-                # Use the actual document height instead of size().height()
-                doc = message_text.document()
-                # Set text width to viewport width for proper wrapping
-                doc.setTextWidth(message_text.viewport().width())
-                doc_height = doc.size().height()
+        message_text.setStyleSheet("""
+            background-color: transparent;
+            color: #e5e7eb;
+            font-size: 14px;
+            padding: 0px;
+            margin: 0px;
+            border: none;
+        """)
+        message_text.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        message_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-                # Set fixed height based on content with extra padding
-                height = int(doc_height) + 10
-                message_text.setFixedHeight(height)
+        doc = message_text.document()
+        doc.setDocumentMargin(0)
+        message_text.setContentsMargins(0, 0, 0, 0)
+        message_text.setViewportMargins(0, 0, 0, 0)
 
-            message_text.document().contentsChanged.connect(adjust_height)
-            adjust_height()  # Call immediately for initial content
+        from PyQt6.QtWidgets import QSizePolicy
+        message_text.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
-            layout.addWidget(message_text, 0, Qt.AlignmentFlag.AlignTop)
+        message_text.document().contentsChanged.connect(lambda: self.adjust_text_height(message_text))
+        
+        # Initial height adjustment
+        return message_text
+
+    def adjust_text_height(self, widget):
+        """Adjust height of text widget"""
+        doc = widget.document()
+        doc.setTextWidth(widget.viewport().width())
+        height = int(doc.size().height()) + 5
+        widget.setFixedHeight(height)
+
+    def parse_message(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Parse markdown text into blocks of text and code.
+        Handles unclosed code blocks for streaming.
+        """
+        blocks = []
+        lines = text.split('\n')
+        current_content = []
+        in_code_block = False
+        current_lang = ""
+        
+        for line in lines:
+            if line.strip().startswith('```'):
+                if in_code_block:
+                    # Closing block
+                    in_code_block = False
+                    blocks.append({
+                        'type': 'code',
+                        'lang': current_lang,
+                        'content': '\n'.join(current_content)
+                    })
+                    current_content = []
+                    current_lang = ""
+                else:
+                    # Opening block
+                    if current_content:
+                        blocks.append({
+                            'type': 'text',
+                            'content': '\n'.join(current_content)
+                        })
+                    
+                    current_content = []
+                    marker = line.strip()[3:].strip()
+                    current_lang = marker
+                    in_code_block = True
+            else:
+                current_content.append(line)
+        
+        # Handle remaining content
+        if in_code_block:
+            # We are in a code block that hasn't closed yet (streaming)
+            # Even if content is empty (just opened fence), we want to show the block
+            blocks.append({
+                'type': 'code',
+                'lang': current_lang,
+                'content': '\n'.join(current_content)
+            })
+        elif current_content:
+            # Remaining text content
+            content = '\n'.join(current_content)
+            if content.strip():
+                blocks.append({
+                    'type': 'text',
+                    'content': content
+                })
+        
+        return blocks
 
 
 class ChatWidget(QWidget):
@@ -967,9 +1242,32 @@ class ChatWidget(QWidget):
                 # Finalize the streaming widget by removing the is_streaming flag
                 streaming_widget.is_streaming = False
             else:
-                # Only add a new message if there's no streaming widget
-                # (This happens for non-streaming responses)
-                self.add_message_widget(message, sender_id)
+                # Fallback: Check if the LAST widget is from the same sender
+                # This handles the case where _finalize_streaming_message cleared the flag
+                # before this callback ran (race condition)
+                last_widget = None
+                if self.chat_layout.count() > 0:
+                    container = self.chat_layout.itemAt(self.chat_layout.count() - 1).widget()
+                    if container:
+                        # Look for MessageWidget inside
+                        for j in range(container.layout().count() if container.layout() else 0):
+                            item = container.layout().itemAt(j)
+                            if item and item.widget():
+                                widget = item.widget()
+                                if isinstance(widget, MessageWidget) and not widget.is_user:  # AI message
+                                     # Verify content matches streaming response to be sure? 
+                                     # Or just assume it's the one since we are in sync conversation
+                                     last_widget = widget
+                                     break
+                
+                if last_widget:
+                    logger.debug("Found last widget as fallback for streaming update")
+                    # Update it just in case
+                    last_widget.update_content(message)
+                    last_widget.is_streaming = False
+                else:
+                    # Only add a new message if there's no streaming/existing widget
+                    self.add_message_widget(message, sender_id)
     
     @pyqtSlot(str, str, str)
     def on_streaming_chunk_received(self, sender_id: str, chunk: str, message_type: str):
@@ -1123,16 +1421,7 @@ class ChatWidget(QWidget):
 
         if streaming_widget:
             # Update the existing widget
-            message_text = streaming_widget.findChild(QTextBrowser)
-            if message_text:
-                # Convert markdown to HTML and display
-                html_content = markdown_to_html(self.streaming_response)
-                message_text.setHtml(html_content)
-                # Manually trigger height recalculation for streaming updates
-                message_text.document().setTextWidth(message_text.viewport().width())
-                doc_height = message_text.document().size().height()
-                height = int(doc_height) + 10
-                message_text.setFixedHeight(height)
+            streaming_widget.update_content(self.streaming_response)
         else:
             # Create a new widget with container
             logger.debug(f"Creating new streaming widget for entity: {self.current_entity_id}")
