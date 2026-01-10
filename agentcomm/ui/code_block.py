@@ -211,6 +211,10 @@ class CodeBlockWidget(QFrame):
         
         self.code_view.setHtml(full_html)
         self.adjust_height()
+        
+        # Auto-scroll to bottom to follow streaming
+        sb = self.code_view.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def adjust_height(self):
         """Fit height to content"""

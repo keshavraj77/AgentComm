@@ -483,6 +483,9 @@ class MessageWidget(QFrame):
             sender_label.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(sender_label)
 
+        # Store is_user for later reference
+        self.is_user = is_user
+
         # Use QLabel for user messages (tighter fit), QTextEdit for AI messages (for streaming)
         if is_user:
             # QLabel for compact, tight-fitting user messages
@@ -711,6 +714,7 @@ class ChatWidget(QWidget):
         self.current_entity_id: Optional[str] = None
         self.current_entity_type: Optional[str] = None
         self.streaming_response: str = ""
+        self.streaming_handled: bool = False  # Flag to track if streaming handled the response
 
         # Register callbacks with thread-safe wrappers
         self.session_manager.register_message_callback(self._thread_safe_message_callback)
@@ -1091,11 +1095,10 @@ class ChatWidget(QWidget):
         # Emit the message sent signal
         self.message_sent.emit(message)
         
-        # Reset the streaming response
+        # Reset the streaming response and flags
         self.streaming_response = ""
-        # Reset the streaming response
-        self.streaming_response = ""
-        
+        self.streaming_handled = False
+
         # Start loading animation
         entity_type = "agent" if self.current_entity_type == "agent" else "llm"
         self.loading_indicator.start_animation(entity_type)
@@ -1172,7 +1175,8 @@ class ChatWidget(QWidget):
 
     def _finalize_streaming_message(self):
         """
-        Finalize the streaming message by updating with final content and removing streaming flag
+        Finalize the streaming message by removing the streaming flag.
+        Content is already rendered by update_content() - no need to re-render here.
         """
         logger.debug(f"Finalizing streaming message. Total length: {len(self.streaming_response)}")
 
@@ -1187,16 +1191,10 @@ class ChatWidget(QWidget):
                 if item and item.widget():
                     widget = item.widget()
                     if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
-                        # Update the widget with the final streaming response
-                        message_text = widget.findChild(QTextBrowser)
-                        if message_text and self.streaming_response:
-                            # Convert markdown to HTML and display
-                            html_content = markdown_to_html(self.streaming_response)
-                            message_text.setHtml(html_content)
-                            logger.debug(f"Updated streaming widget with final text: {self.streaming_response[:50]}...")
-
                         # Mark as no longer streaming (don't delete the attribute)
+                        # Content is already properly rendered via update_content()
                         widget.is_streaming = False
+                        logger.debug("Streaming widget finalized")
                         return
     
     
@@ -1216,58 +1214,17 @@ class ChatWidget(QWidget):
             return
 
         if self.current_entity_id == sender_id:
-            # Check if there's already a streaming widget - if so, finalize it
-            # The streaming response is already being displayed via update_streaming_message
-            # We don't need to add a duplicate message
-            streaming_widget = None
+            # If streaming already handled this response, don't add a duplicate
+            # The streaming path (update_streaming_message + _finalize_streaming_message)
+            # already displayed the content
+            if self.streaming_handled:
+                logger.debug("Streaming already handled this response, skipping on_message_received")
+                self.streaming_handled = False  # Reset for next message
+                return
 
-            for i in range(self.chat_layout.count()):
-                container = self.chat_layout.itemAt(i).widget()
-                if not container:
-                    continue
-
-                # Look for MessageWidget inside the container
-                for j in range(container.layout().count() if container.layout() else 0):
-                    item = container.layout().itemAt(j)
-                    if item and item.widget():
-                        widget = item.widget()
-                        if isinstance(widget, MessageWidget) and hasattr(widget, "is_streaming") and widget.is_streaming:
-                            streaming_widget = widget
-                            break
-
-                if streaming_widget:
-                    break
-
-            if streaming_widget:
-                # Finalize the streaming widget by removing the is_streaming flag
-                streaming_widget.is_streaming = False
-            else:
-                # Fallback: Check if the LAST widget is from the same sender
-                # This handles the case where _finalize_streaming_message cleared the flag
-                # before this callback ran (race condition)
-                last_widget = None
-                if self.chat_layout.count() > 0:
-                    container = self.chat_layout.itemAt(self.chat_layout.count() - 1).widget()
-                    if container:
-                        # Look for MessageWidget inside
-                        for j in range(container.layout().count() if container.layout() else 0):
-                            item = container.layout().itemAt(j)
-                            if item and item.widget():
-                                widget = item.widget()
-                                if isinstance(widget, MessageWidget) and not widget.is_user:  # AI message
-                                     # Verify content matches streaming response to be sure? 
-                                     # Or just assume it's the one since we are in sync conversation
-                                     last_widget = widget
-                                     break
-                
-                if last_widget:
-                    logger.debug("Found last widget as fallback for streaming update")
-                    # Update it just in case
-                    last_widget.update_content(message)
-                    last_widget.is_streaming = False
-                else:
-                    # Only add a new message if there's no streaming/existing widget
-                    self.add_message_widget(message, sender_id)
+            # No streaming happened (e.g., non-streaming response or error recovery)
+            # Add the message normally
+            self.add_message_widget(message, sender_id)
     
     @pyqtSlot(str, str, str)
     def on_streaming_chunk_received(self, sender_id: str, chunk: str, message_type: str):
@@ -1329,6 +1286,9 @@ class ChatWidget(QWidget):
                     self.loading_indicator, "stop_animation",
                     Qt.ConnectionType.QueuedConnection
                 )
+
+            # Mark that streaming is handling this response (prevents duplicate in on_message_received)
+            self.streaming_handled = True
 
             # Append the chunk to the streaming response
             self.streaming_response += chunk
