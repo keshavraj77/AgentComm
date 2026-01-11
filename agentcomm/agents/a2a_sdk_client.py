@@ -13,7 +13,8 @@ from a2a.types import (
     AgentCard, TransportProtocol, SecurityScheme,
     HTTPAuthSecurityScheme, APIKeySecurityScheme,
     AgentCapabilities, Role,
-    MessageSendConfiguration, PushNotificationConfig
+    MessageSendConfiguration, PushNotificationConfig,
+    TaskQueryParams
 )
 from a2a.client import create_text_message_object
 from a2a.client.auth import InMemoryContextCredentialStore
@@ -219,8 +220,7 @@ class A2ASDKClientWrapper:
             Response dictionaries from the agent
         """
         try:
-            logger.info(f"Sending message to {agent_url} via {transport}")
-            logger.debug(f"Message: {message[:100]}...")
+            logger.info(f"Sending message to {agent_url} via {transport} (length: {len(message)})")
 
             # Get or create client
             client = await self.get_client(
@@ -306,8 +306,7 @@ class A2ASDKClientWrapper:
             Streaming response chunks from the agent
         """
         try:
-            logger.info(f"Sending streaming message to {agent_url} via {transport}")
-            logger.debug(f"Message: {message[:100]}...")
+            logger.info(f"Sending streaming message to {agent_url} via {transport} (length: {len(message)})")
 
             # Get or create client
             client = await self.get_client(
@@ -356,8 +355,7 @@ class A2ASDKClientWrapper:
                     chunk_count = 0
                     async for chunk in client.send_message(msg, **config_kwargs):
                         chunk_count += 1
-                        logger.info(f"Received chunk #{chunk_count}: type={type(chunk).__name__}")
-                        logger.debug(f"Chunk content: {chunk}")
+                        logger.debug(f"Received chunk #{chunk_count}: type={type(chunk).__name__}")
                         yield {
                             "result": chunk
                         }
@@ -392,6 +390,70 @@ class A2ASDKClientWrapper:
                 del self.clients[client_key]
 
             yield {
+                "error": {
+                    "code": -1,
+                    "message": f"Error: {e}"
+                }
+            }
+
+    async def get_task(
+        self,
+        agent_url: str,
+        task_id: str,
+        transport: str = "jsonrpc",
+        auth_type: str = "none",
+        api_key_name: Optional[str] = None,
+        token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Get task status from an A2A agent
+
+        Args:
+            agent_url: URL of the agent
+            task_id: ID of the task to retrieve
+            transport: Transport protocol
+            auth_type: Authentication type
+            api_key_name: API key header name
+            token: Authentication token
+
+        Returns:
+            Response dictionary containing the task
+        """
+        try:
+            logger.info(f"Getting task {task_id} from {agent_url}")
+
+            # Get or create client
+            client = await self.get_client(
+                agent_url, transport, auth_type, api_key_name, token
+            )
+
+            # Create TaskQueryParams object with the task ID
+            query_params = TaskQueryParams(id=task_id)
+
+            # Call get_task on the client
+            # The SDK client returns a Task object directly
+            task = await client.get_task(query_params)
+
+            # High-level task logging
+            logger.info(f"Task response for {task_id}: state={task.state if hasattr(task, 'state') else 'N/A'}")
+
+            # Log counts if present
+            if hasattr(task, 'messages') and task.messages:
+                logger.info(f"  - Messages count: {len(task.messages)}")
+            
+            if hasattr(task, 'artifacts') and task.artifacts:
+                logger.info(f"  - Artifacts count: {len(task.artifacts)}")
+
+            # Wrap in result dict to match expected format in AgentComm
+            return {
+                "result": {
+                    "task": task
+                }
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting task via A2A SDK: {e}", exc_info=True)
+            return {
                 "error": {
                     "code": -1,
                     "message": f"Error: {e}"

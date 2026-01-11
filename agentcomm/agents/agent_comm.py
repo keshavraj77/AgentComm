@@ -12,16 +12,12 @@ from agentcomm.agents.a2a_client import A2AClient, Message
 from agentcomm.agents.a2a_sdk_client import A2ASDKClientWrapper
 from agentcomm.agents.webhook_handler import WebhookHandler
 from agentcomm.agents.ngrok_manager import NgrokManager
-from agentcomm.agents.task_state import TaskState, TaskStateResult
+from agentcomm.agents.task_state import TaskState, TaskStateResult, DEFAULT_STATE_MESSAGES
 
 logger = logging.getLogger(__name__)
 
 
-# Default status messages for active states
-DEFAULT_STATUS_MESSAGES = {
-    TaskState.SUBMITTED: "Task submitted, waiting for agent...",
-    TaskState.WORKING: "Agent is processing...",
-}
+
 
 class AgentComm:
     """
@@ -148,7 +144,11 @@ class AgentComm:
         """
         content = ""
 
-        if not task or not hasattr(task, 'artifacts') or not task.artifacts:
+        if not task:
+            logger.debug("Task is None, cannot extract artifacts")
+            return content
+
+        if not hasattr(task, 'artifacts') or not task.artifacts:
             return content
 
         for artifact in task.artifacts:
@@ -166,13 +166,67 @@ class AgentComm:
                 elif hasattr(part, 'content') and part.content:
                     content += part.content
 
+        if content:
+            logger.info(f"Extracted {len(content)} chars from artifacts")
+        return content
+
+    def _extract_content_from_messages(self, task: Any) -> str:
+        """
+        Extract text content from task messages.
+
+        Some agents return content in messages instead of artifacts.
+        This is used as a fallback when artifacts are empty.
+
+        Args:
+            task: Task object from A2A SDK
+
+        Returns:
+            Extracted text content from messages
+        """
+        content = ""
+
+        if not task:
+            return content
+
+        if not hasattr(task, 'messages') or not task.messages:
+            return content
+
+        for message in task.messages:
+            # Check if message has parts
+            if hasattr(message, 'parts') and message.parts:
+                for part in message.parts:
+                    # Handle Part wrapper with root attribute (SDK format)
+                    if hasattr(part, 'root'):
+                        if hasattr(part.root, 'text') and part.root.text:
+                            content += part.root.text
+                    # Direct text attribute
+                    elif hasattr(part, 'text') and part.text:
+                        content += part.text
+                    # Direct content attribute
+                    elif hasattr(part, 'content') and part.content:
+                        content += str(part.content)
+
+            # Check if message has direct content attribute
+            elif hasattr(message, 'content'):
+                if isinstance(message.content, str):
+                    content += message.content
+                elif isinstance(message.content, list):
+                    for item in message.content:
+                        if hasattr(item, 'text'):
+                            content += item.text
+                        elif isinstance(item, dict) and 'text' in item:
+                            content += item['text']
+
+        if content:
+            logger.info(f"Extracted {len(content)} chars from messages")
         return content
 
     def _extract_status_message(self, task: Any) -> Optional[str]:
         """
         Extract status message from task.status.message.
 
-        Used for active states where status message shows progress.
+        Used for active states where status message shows progress,
+        and also as a fallback for terminal states.
 
         Args:
             task: Task object from A2A SDK
@@ -201,6 +255,8 @@ class AgentComm:
                 elif hasattr(part, 'text') and part.text:
                     text += part.text
 
+        if text:
+            logger.info(f"Extracted {len(text)} chars from status.message")
         return text if text else None
 
     def _extract_event_artifact_content(self, event: Any) -> str:
@@ -259,13 +315,26 @@ class AgentComm:
         )
 
         if state.is_terminal():
-            # Terminal states: extract content from artifacts
+            # Terminal states: extract content with fallback priority:
+            # 1. artifacts (rare, but spec-compliant)
+            # 2. status.message (common location for completed task content)
+            # 3. messages (alternative location)
             content = self._extract_content_from_artifacts(task)
             logger.info(f"Terminal state ({state.value}) - Extracted {len(content)} chars from artifacts")
 
+            if not content:
+                logger.info("Artifacts empty, trying to extract from status.message")
+                content = self._extract_status_message(task) or ""
+                logger.info(f"Terminal state ({state.value}) - Extracted {len(content)} chars from status.message")
+
+            if not content:
+                logger.info("Status message empty, trying to extract from messages")
+                content = self._extract_content_from_messages(task)
+                logger.info(f"Terminal state ({state.value}) - Extracted {len(content)} chars from messages")
+
             return TaskStateResult(
                 state=state,
-                content=content,
+                content=content if content else DEFAULT_STATE_MESSAGES.get(state, "Task finished."),
                 is_final=True,
                 should_poll=False,
                 task_id=task_id,
@@ -273,8 +342,11 @@ class AgentComm:
 
         elif state.is_interrupted():
             # Interrupted states (input-required, auth-required): stream content as-is
-            # First try artifacts, then status message
+            # First try artifacts, then messages, then status message
             content = self._extract_content_from_artifacts(task)
+            if not content:
+                logger.info("Artifacts empty for interrupted state, trying messages")
+                content = self._extract_content_from_messages(task)
             if not content:
                 content = self._extract_status_message(task) or ""
 
@@ -283,6 +355,7 @@ class AgentComm:
             return TaskStateResult(
                 state=state,
                 content=content,
+                status_message=DEFAULT_STATE_MESSAGES.get(state, "Action required."),
                 is_final=True,  # Interrupted states are "final" in that user needs to respond
                 should_poll=False,
                 task_id=task_id,
@@ -294,9 +367,7 @@ class AgentComm:
 
             # Use default message if no agent-provided status
             if not status_msg:
-                status_msg = DEFAULT_STATUS_MESSAGES.get(state, "Processing...")
-
-            logger.info(f"Active state ({state.value}) - Status: {status_msg}")
+                status_msg = DEFAULT_STATE_MESSAGES.get(state, "Processing...")
 
             # Check for incremental content from event
             event_content = self._extract_event_artifact_content(event) if event else ""
@@ -539,7 +610,7 @@ class AgentComm:
                                 last_status_message = task_result.status_message
                                 yield f"<<<STATUS>>>{task_result.status_message}"
                                 yielded_any_content = True
-                                logger.info(f"Yielded status: {task_result.status_message}")
+                                logger.info(f"Yielded status signal (length: {len(task_result.status_message)})")
 
                             # Also yield any incremental content from events
                             if task_result.content:
@@ -562,27 +633,37 @@ class AgentComm:
                         if "contextId" in result:
                             self.context_id = result["contextId"]
 
-                # After initial stream, wait for webhook notifications if in active state
-                if webhook_queue and task_id and last_state and last_state.is_active():
-                    logger.info(f"Stream complete in active state ({last_state.value}), waiting for webhook")
-                    async for chunk in self._wait_for_webhook_completion(
-                        webhook_queue, task_id, last_state
-                    ):
-                        if chunk.startswith("<<<"):
-                            yield chunk
-                            yielded_any_content = True
-                        else:
-                            response_text += chunk
-                            yield chunk
                             yielded_any_content = True
 
+                # If still active after streaming (waiting for webhook or manual poll)
+                if task_id and last_state and last_state.is_active():
+                    # Send task ID signal for UI manual polling
+                    yield f"<<<TASK_ID>>>{task_id}"
+                    
+                    if push_config and webhook_queue:
+                        # Push notifications ENABLED: Wait for webhook
+                        logger.info(f"Stream complete in active state ({last_state.value}), waiting for webhook")
+                        async for chunk in self._wait_for_webhook_completion(
+                            webhook_queue, task_id, last_state
+                        ):
+                            if chunk.startswith("<<<"):
+                                yield chunk
+                                yielded_any_content = True
+                            else:
+                                response_text += chunk
+                                yield chunk
+                                yielded_any_content = True
+                    else:
+                        # Push notifications DISABLED: Signal UI to show manual poll button
+                        logger.info(f"Stream complete in active state ({last_state.value}), requesting manual poll")
+                        yield "<<<POLL_REQUIRED>>>"
+                        yielded_any_content = True
+
                 # Cleanup webhook callback
-                if task_id and self.webhook_handler:
-                    self.webhook_handler.unregister_callback(task_id)
                     logger.info(f"Cleaned up webhook callback for task {task_id}")
 
             else:
-                # Legacy client path
+                # Legacy client path (unchanged)
                 msg = Message(
                     content=message,
                     content_type="text/plain",
@@ -679,37 +760,53 @@ class AgentComm:
 
                 # Wait for webhook notification
                 task_data = await asyncio.wait_for(webhook_queue.get(), timeout=1.0)
-                logger.info(f"Received webhook notification for task {task_id}")
+                logger.info(f"Webhook notification #{len(webhook_queue._queue) + 1} received for task {task_id}")
 
-                # Parse state from webhook data
-                state_str = task_data.get('status', {}).get('state', '')
-                state = TaskState.from_string(state_str)
-                logger.info(f"Webhook task state: {state.value}")
+                # Reset timeout counter since we received activity
+                start_time = asyncio.get_event_loop().time()
+
+                # Fetch latest task status immediately upon notification
+                task_result = await self.get_task_status(task_id)
+                state = task_result.state
+                logger.info(f"Task status update: {state.value}")
 
                 if state.is_terminal():
-                    # Terminal state: extract final content from artifacts
+                    # Terminal state reached - display final content and exit loop
                     yield "<<<CLEAR>>>"
-                    content = self._extract_webhook_artifacts(task_data)
-                    if content:
-                        logger.info(f"Webhook final response: {len(content)} chars")
-                        yield content
+
+                    if task_result.content:
+                        logger.info(f"Yielded final content (length: {len(task_result.content)})")
+                        yield task_result.content
+
                     break
 
                 elif state.is_interrupted():
-                    # Interrupted state: extract content (user prompt)
-                    content = self._extract_webhook_artifacts(task_data)
-                    if not content:
-                        content = self._extract_webhook_status_message(task_data)
-                    if content:
-                        yield content
+                    # Interrupted state (input/auth required) - user action needed
+                    if task_result.content:
+                        logger.info(f"Yielded interrupted content (length: {len(task_result.content)})")
+                        yield task_result.content
+                    elif task_result.status_message:
+                        logger.info(f"Yielded interrupted status signal (length: {len(task_result.status_message)})")
+                        yield f"<<<STATUS>>>{task_result.status_message}"
+
                     break
 
                 elif state.is_active():
-                    # Active state: emit status message
-                    status_msg = self._extract_webhook_status_message(task_data)
-                    if status_msg and status_msg != last_status:
-                        last_status = status_msg
-                        yield f"<<<STATUS>>>{status_msg}"
+                    # Active state (working/submitted) - task still in progress
+                    if task_result.status_message:
+                        if task_result.status_message != last_status:
+                            last_status = task_result.status_message
+                            logger.info(f"Yielded new status signal (length: {len(last_status)})")
+                            yield f"<<<STATUS>>>{last_status}"
+                    
+                    # Continue waiting for next notification
+                    continue
+
+                else:
+                    # Unspecified or unknown state - should not happen
+                    continue
+
+
 
             except asyncio.TimeoutError:
                 # No notification yet, continue waiting
@@ -740,6 +837,78 @@ class AgentComm:
                         return text
         return None
     
+    async def get_last_response(self) -> str:
+        """
+        Get the last response from the agent
+        
+        Returns:
+            Last response from the agent
+        """
+        return self.last_response or ""
+    async def get_task_status(self, task_id: str) -> TaskStateResult:
+        """
+        Get the current status of a task via task/get API.
+        
+        Used for manual polling when push notifications are disabled.
+        
+        Args:
+            task_id: ID of the task to check
+            
+        Returns:
+            TaskStateResult with current status
+        """
+        try:
+            # Get authentication headers
+            auth_headers = self.agent.authentication.get_headers()
+            
+            # Call task/get endpoint
+            if self.use_sdk and self.a2a_sdk_client:
+                response = await self.a2a_sdk_client.get_task(
+                    agent_url=self.agent.url,
+                    task_id=task_id,
+                    transport=self.agent.transport,
+                    auth_type=self.agent.authentication.auth_type,
+                    api_key_name=self.agent.authentication.api_key_name,
+                    token=self.agent.authentication.token
+                )
+            else:
+                response = await self.a2a_client.get_task(
+                    agent_url=self.agent.url,
+                    task_id=task_id,
+                    auth_headers=auth_headers
+                )
+            
+            task = None
+            if "result" in response and isinstance(response["result"], dict):
+                result = response["result"]
+                # Handle both wrapped task and direct task object
+                if "task" in result:
+                    task = result["task"]
+                elif "kind" in result and result["kind"] == "task":
+                    task = result
+                elif "id" in result: # Assume it's the task object
+                    task = result
+                    
+            if not task:
+                logger.error(f"Failed to get task status for {task_id}")
+                return TaskStateResult(
+                    state=TaskState.UNSPECIFIED,
+                    content="Failed to retrieve task status.",
+                    is_final=True
+                )
+                
+            # Process the task response
+            # Since this is a polling check, pass None for event and last_state since we want absolute state
+            return self._process_task_response(task)
+            
+        except Exception as e:
+            logger.error(f"Error getting task status: {e}")
+            return TaskStateResult(
+                state=TaskState.FAILED,
+                content=f"Error checking task status: {str(e)}",
+                is_final=True
+            )
+
     async def get_last_response(self) -> str:
         """
         Get the last response from the agent

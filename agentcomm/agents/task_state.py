@@ -5,6 +5,8 @@ A2A Task State definitions and utilities
 from enum import Enum
 from typing import Optional
 
+# Default messages for each task state
+
 
 class TaskState(Enum):
     """
@@ -25,6 +27,7 @@ class TaskState(Enum):
     INPUT_REQUIRED = "input-required"
     REJECTED = "rejected"
     AUTH_REQUIRED = "auth-required"
+
 
     @classmethod
     def from_string(cls, state_str: str) -> "TaskState":
@@ -149,3 +152,15 @@ class TaskStateResult:
             f"should_poll={self.should_poll}, "
             f"is_final={self.is_final})"
         )
+
+DEFAULT_STATE_MESSAGES = {
+    TaskState.COMPLETED: "Task completed successfully.",
+    TaskState.FAILED: "Task failed. Please try again.",
+    TaskState.CANCELLED: "Task was cancelled.",
+    TaskState.REJECTED: "Task was rejected by the agent.",
+    TaskState.INPUT_REQUIRED: "The agent requires additional input.",
+    TaskState.AUTH_REQUIRED: "Authentication is required to proceed.",
+    TaskState.SUBMITTED: "Task has been submitted. Waiting for agent...",
+    TaskState.WORKING: "Agent is processing your request...",
+    TaskState.UNSPECIFIED: "Task state is unknown.",
+}

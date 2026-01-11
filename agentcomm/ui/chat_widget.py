@@ -408,6 +408,91 @@ def run_async_in_thread(coro_func, *args, on_complete=None, **kwargs):
     # Schedule the coroutine on the persistent event loop
     asyncio.run_coroutine_threadsafe(wrapper(), loop)
 
+class TaskPollingWidget(QFrame):
+    """
+    Widget for manual task polling when push notifications are disabled.
+    Displays task ID and a refresh button.
+    """
+    refresh_clicked = pyqtSignal(str)  # Emits task_id
+
+    def __init__(self, task_id: str, parent=None):
+        super().__init__(parent)
+        self.task_id = task_id
+        self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
+        self.setStyleSheet("""
+            TaskPollingWidget {
+                background-color: #2a2a2a;
+                border: 1px solid #3f3f46;
+                border-radius: 6px;
+                margin: 5px 0px;
+            }
+        """)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        
+        # Info icon label
+        icon_label = QLabel("⚡")
+        icon_label.setStyleSheet("font-size: 16px;")
+        layout.addWidget(icon_label)
+        
+        # Text info
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        
+        status_label = QLabel("Task in Progress")
+        status_label.setStyleSheet("color: #e5e7eb; font-weight: bold;")
+        info_layout.addWidget(status_label)
+        
+        id_label = QLabel(f"ID: {task_id[:8]}...")
+        id_label.setToolTip(task_id)
+        id_label.setStyleSheet("color: #9ca3af; font-family: monospace; font-size: 11px;")
+        info_layout.addWidget(id_label)
+        
+        # Push notification hint
+        hint_label = QLabel("Enable push notifications for auto-updates")
+        hint_label.setStyleSheet("color: #6b7280; font-size: 10px; font-style: italic;")
+        info_layout.addWidget(hint_label)
+        
+        layout.addLayout(info_layout)
+        layout.addStretch()
+        
+        # Refresh button
+        self.refresh_btn = QPushButton("Refresh Status")
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3b82f6;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+            }
+            QPushButton:pressed {
+                background-color: #1d4ed8;
+            }
+            QPushButton:disabled {
+                background-color: #4b5563;
+                color: #9ca3af;
+            }
+        """)
+        self.refresh_btn.clicked.connect(self._on_refresh_clicked)
+        layout.addWidget(self.refresh_btn)
+        
+    def _on_refresh_clicked(self):
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("Checking...")
+        self.refresh_clicked.emit(self.task_id)
+        
+    def reset_button(self):
+        self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("Refresh Status")
+
+
 class MessageWidget(QFrame):
     """
     Widget for displaying a single message in the chat
@@ -714,7 +799,12 @@ class ChatWidget(QWidget):
         self.current_entity_id: Optional[str] = None
         self.current_entity_type: Optional[str] = None
         self.streaming_response: str = ""
+        self.current_entity_id: Optional[str] = None
+        self.current_entity_type: Optional[str] = None
+        self.streaming_response: str = ""
         self.streaming_handled: bool = False  # Flag to track if streaming handled the response
+        self._polling_task_id: Optional[str] = None
+        self._polling_widget: Optional[TaskPollingWidget] = None
 
         # Register callbacks with thread-safe wrappers
         self.session_manager.register_message_callback(self._thread_safe_message_callback)
@@ -1122,6 +1212,9 @@ class ChatWidget(QWidget):
             on_complete: Callback to call when the message is sent
         """
         try:
+            # Disable input while processing
+            QMetaObject.invokeMethod(self, "set_input_enabled", Qt.ConnectionType.QueuedConnection, Q_ARG(bool, False))
+            
             # Auto-rename thread if it's the first user message and thread has default name
             current_thread = self.session_manager.get_current_thread()
             if current_thread:
@@ -1154,6 +1247,25 @@ class ChatWidget(QWidget):
             QMetaObject.invokeMethod(self, "on_error_received", Qt.ConnectionType.QueuedConnection, Q_ARG(str, str(e)))
             # Stop the update timer using a helper slot
             QMetaObject.invokeMethod(self, "_stop_update_timer", Qt.ConnectionType.QueuedConnection)
+            # Re-enable input on failure
+            QMetaObject.invokeMethod(self, "set_input_enabled", Qt.ConnectionType.QueuedConnection, Q_ARG(bool, True))
+
+    @pyqtSlot(bool)
+    def set_input_enabled(self, enabled: bool):
+        """Enable or disable input fields"""
+        self.message_input.setEnabled(enabled)
+        self.send_button.setEnabled(enabled)
+        self.reset_button.setEnabled(enabled)
+        
+        if enabled:
+            self.message_input.setPlaceholderText("Type your message here...")
+            # Restore background
+            self.message_input.setStyleSheet(self.message_input.styleSheet().replace("background: #1f1f22;", "background: #2a2a2a;"))
+            self.message_input.setFocus()
+        else:
+            self.message_input.setPlaceholderText("Waiting for task to complete...")
+            # Darker background to indicate disabled state
+            self.message_input.setStyleSheet(self.message_input.styleSheet().replace("background: #2a2a2a;", "background: #1f1f22;"))
 
     @pyqtSlot()
     def _do_final_update(self):
@@ -1267,7 +1379,7 @@ class ChatWidget(QWidget):
             # Check for STATUS signal - update loading indicator with custom status
             if chunk.startswith("<<<STATUS>>>"):
                 status_text = chunk[12:]
-                logger.info(f"Received STATUS signal: {status_text}")
+                logger.info(f"Received STATUS signal (length: {len(status_text)})")
 
                 # Update the loading indicator with the agent's status message
                 # This overrides the default rotating phrases
@@ -1290,7 +1402,7 @@ class ChatWidget(QWidget):
             # Check for CLEAR signal to reset the streaming response
             # Note: CLEAR just resets state, don't stop animation - wait for real content
             if chunk == "<<<CLEAR>>>":
-                logger.info("Received CLEAR signal - resetting streaming response")
+                logger.info("Received CLEAR signal")
                 self.streaming_response = ""
 
                 # Clear custom status when state transitions
@@ -1301,6 +1413,35 @@ class ChatWidget(QWidget):
                 # Don't stop animation here - wait for actual content to arrive
                 return
 
+            # Check for TASK_ID signal
+            if chunk.startswith("<<<TASK_ID>>>"):
+                task_id = chunk[13:]
+                self._polling_task_id = task_id
+                logger.info(f"Captured task ID: {task_id}")
+                # Ensure input remains disabled
+                QMetaObject.invokeMethod(self, "set_input_enabled", Qt.ConnectionType.QueuedConnection, Q_ARG(bool, False))
+                return
+
+            # Check for POLL_REQUIRED signal
+            if chunk.startswith("<<<POLL_REQUIRED>>>"):
+                logger.info("Manual polling required signal received")
+                if self._polling_task_id:
+                    self._show_polling_widget(self._polling_task_id)
+                self.loading_indicator.stop_animation()
+                # Ensure input remains disabled
+                QMetaObject.invokeMethod(self, "set_input_enabled", Qt.ConnectionType.QueuedConnection, Q_ARG(bool, False))
+                return
+
+            # Check for NOTIFICATION_RECEIVED signal
+            if chunk.startswith("<<<NOTIFICATION_RECEIVED>>>"):
+                logger.info("Notification received signal")
+                QMetaObject.invokeMethod(
+                    self.loading_indicator, "show_notification_received",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, self.current_entity_id or "Agent")
+                )
+                return
+
             # Stop loading animation when receiving real content
             # Use thread-safe method via QMetaObject
             if self.loading_indicator.isVisible():
@@ -1308,6 +1449,20 @@ class ChatWidget(QWidget):
                     self.loading_indicator, "stop_animation",
                     Qt.ConnectionType.QueuedConnection
                 )
+                
+            # If we received content, usually means task is done or prompting
+            # But let the specific polling/webhook logic handle critical re-enabling
+            # unless it's a simple message (LLM or non-task agent)
+            # For safe measure, if it's NOT a special signal, we might want to re-enable?
+            # Actually, for task agents, AgentComm yields content ONLY when terminal/interrupted
+            # So if we get real content, we can enable input.
+            if not chunk.startswith("<<<"):
+                 QMetaObject.invokeMethod(self, "set_input_enabled", Qt.ConnectionType.QueuedConnection, Q_ARG(bool, True))
+            
+            # Hide polling widget if real content arrives (state changed to terminal)
+            if self._polling_widget and self._polling_widget.isVisible():
+                self._polling_widget.deleteLater()
+                self._polling_widget = None
 
             # Mark that streaming is handling this response (prevents duplicate in on_message_received)
             self.streaming_handled = True
@@ -1315,22 +1470,140 @@ class ChatWidget(QWidget):
             # Append the chunk to the streaming response
             self.streaming_response += chunk
             logger.debug(f"Streaming chunk received. Total length now: {len(self.streaming_response)}")
+            
+    def _show_polling_widget(self, task_id: str):
+        """Show the manual polling widget"""
+        # Remove existing if present
+        if self._polling_widget:
+            self._polling_widget.deleteLater()
+            
+        self._polling_widget = TaskPollingWidget(task_id)
+        self._polling_widget.refresh_clicked.connect(self.trigger_manual_poll)
+        
+        # Add to chat layout (AI side)
+        container = QWidget()
+        container_layout = QHBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.addWidget(self._polling_widget)
+        # Add stretch to keep it left-aligned (AI side)
+        container_layout.addStretch()
+        
+        self.chat_layout.addWidget(container)
+        
+        # Scroll to bottom
+        QTimer.singleShot(100, lambda: self.chat_scroll_area.verticalScrollBar().setValue(
+            self.chat_scroll_area.verticalScrollBar().maximum()
+        ))
+        
+    def trigger_manual_poll(self, task_id: str):
+        """Trigger a manual poll for task status"""
+        logger.info(f"Triggering manual poll for task {task_id}")
+        
+        # Start loading indicator again slightly
+        entity_type = "agent" if self.current_entity_type == "agent" else "llm"
+        self.loading_indicator.start_animation(entity_type)
+        self.loading_indicator.start_animation(entity_type)
+        self.loading_indicator.set_custom_status("Agent is active - Input disabled")
+        
+        run_async_in_thread(self._do_manual_poll_async, task_id)
+        
+    async def _do_manual_poll_async(self, task_id: str):
+        """Perform manual poll asynchronously"""
+        try:
+            if not self.session_manager.agent_comm:
+                logger.error("No agent_comm available for polling")
+                return
+
+            # Call get_task_status directly
+            result = await self.session_manager.agent_comm.get_task_status(task_id)
+            
+            # Handle result in main thread
+            QMetaObject.invokeMethod(
+                self, "_handle_poll_result",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(object, result)
+            )
+            
+        except Exception as e:
+            logger.error(f"Error polling task: {e}")
+            QMetaObject.invokeMethod(self, "on_error_received", Qt.ConnectionType.QueuedConnection, Q_ARG(str, str(e)))
+
+    @pyqtSlot(object)
+    def _handle_poll_result(self, result):
+        """Handle the result of a manual poll"""
+        # Reset button state
+        if self._polling_widget:
+            self._polling_widget.reset_button()
+            
+        state = result.state
+        
+        if state.is_terminal():
+            # Task finished!
+            logger.info(f"Poll result: Terminal state {state.value}")
+            
+            # Remove polling widget
+            if self._polling_widget:
+                self._polling_widget.deleteLater()
+                self._polling_widget = None
+                
+            # Stop loading indicator
+            self.loading_indicator.stop_animation()
+            
+            # Add final content
+            content = result.content
+            # Use defaults if empty (handled by AgentComm but safe check)
+            if not content:
+                from agentcomm.agents.task_state import DEFAULT_STATE_MESSAGES
+                content = DEFAULT_STATE_MESSAGES.get(state, "Task completed.")
+                
+            # Perform saving to history
+            self.session_manager.receive_agent_response(content)
+            
+            self.add_message_widget(content, self.current_entity_id or "Agent")
+            # Enable input for terminal states
+            self.set_input_enabled(True)
+            
+        elif state.is_interrupted():
+            # User input required
+            logger.info(f"Poll result: Interrupted state {state.value}")
+            
+            # Update status message
+            msg = result.status_message or "Action required"
+            self.loading_indicator.set_custom_status(msg)
+            
+            # Maybe show content if any (prompt)
+            if result.content:
+                # Perform saving to history
+                self.session_manager.receive_agent_response(result.content)
+                self.add_message_widget(result.content, self.current_entity_id or "Agent")
+                
+            # Enable input for interrupted states logic (user needs to reply)
+            self.set_input_enabled(True)
+                
+        else:
+            # Still working
+            logger.info(f"Poll result: Active state {state.value}")
+            msg = result.status_message or "Agent is still working..."
+            self.loading_indicator.set_custom_status(msg)
+            
+            # Keep input disabled
+            self.set_input_enabled(False)
+            
+            # Keep polling widget visible
+            # Maybe auto-close loading indicator if we want to rely on the button?
+            # But the button "Refreshing..." state is good feedback.
+            # Let's stop the main indicator after a brief delay so user sees "Checking..." then back to button
+            QTimer.singleShot(1500, self.loading_indicator.stop_animation)
     
     @pyqtSlot(str)
     def on_error_received(self, error_message: str):
-        """
-        Handle an error
-        
-        Args:
-            error_message: Error message
-        """
-        # Add the error message to the chat display
-
-        # Stop loading animation on error
+        """Handle error, display and stop loading"""
         self.loading_indicator.stop_animation()
-        
-        # Add the error message to the chat display
+        self.loading_indicator.stop_animation()
         self.add_message_widget(f"Error: {error_message}", "System")
+        
+        # Always re-enable input on error so user isn't stuck
+        self.set_input_enabled(True)
     
     def reset_thread(self):
         """

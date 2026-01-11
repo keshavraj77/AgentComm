@@ -522,6 +522,30 @@ class SessionManager:
             self._notify_error(f"Error sending message: {e}")
             return False
             
+    def receive_agent_response(self, content: str) -> bool:
+        """
+        Record a response received from an agent (e.g. via polling or webhook)
+        
+        Args:
+            content: The message content
+            
+        Returns:
+            True if successful
+        """
+        try:
+            history = self.get_current_chat_history()
+            if history and content:
+                history.add_assistant_message(content)
+                
+                # Trigger auto-save
+                if self.auto_save_callback:
+                    self.auto_save_callback()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Error receiving agent response: {e}")
+            return False
+            
     def reset_current_thread(self) -> bool:
         """
         Reset the current thread by clearing all messages

@@ -423,7 +423,36 @@ class LoadingIndicator(QWidget):
              if len(display_text) > 80:
                  display_text = display_text[:77] + "..."
              
-             self.status_label.setText(display_text)
+        # Use message_label instead of non-existent status_label
+        self.message_label.setText(display_text)
+
+    @pyqtSlot(str)
+    def show_notification_received(self, agent_name: str = "Agent"):
+        """
+        Show a brief notification that webhook data was received.
+        
+        Args:
+            agent_name: Name of the agent
+        """
+        self.custom_status_mode = True
+        notification_text = f"🔔 update received from {agent_name}..."
+        self.message_label.setText(notification_text)
+        
+        # Make sure we're visible
+        if not self.isVisible():
+            self.star.start()
+            self.message_label.start()
+            self.show()
+            
+        # Clear after 3 seconds if not updated again
+        QTimer.singleShot(3000, lambda: self._clear_notification_if_match(notification_text))
+
+    def _clear_notification_if_match(self, text_to_match: str):
+        """Clear notification if it hasn't changed"""
+        if self.message_label.text() == text_to_match:
+            self.custom_status_mode = False
+            if self.entity_type == "agent" and not self.aborted:
+                self._set_random_phrase()
 
     @pyqtSlot(str)
     def set_custom_status(self, status_text: str):
