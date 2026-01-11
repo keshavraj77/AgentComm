@@ -114,6 +114,13 @@ class LocalLLMProvider(LLMProvider):
         async with self.client.stream("POST", endpoint, json=payload) as response:
             response.raise_for_status()
             
+            # State for thinking parsing
+            thinking_state = {
+                "in_thinking": False,
+                "current_tag": None,
+                "buffer": ""
+            }
+            
             async for line in response.aiter_lines():
                 if not line.strip():
                     continue
@@ -128,12 +135,25 @@ class LocalLLMProvider(LLMProvider):
                 try:
                     data = json.loads(line)
                     
-                    # Extract the generated text from OpenAI format
+                    # Extract content
+                    content = ""
                     if "choices" in data and len(data["choices"]) > 0:
                         delta = data["choices"][0].get("delta", {})
+                        
+                        # Check for specific reasoning_content field (DeepSeek R1 via some providers)
+                        if "reasoning_content" in delta and delta["reasoning_content"]:
+                            thinking_content = delta["reasoning_content"]
+                            yield f"<<<THINKING>>>{thinking_content}"
+                            continue
+                            
+                        # Standard content
                         content = delta.get("content", "")
-                        if content:
-                            yield content
+                        
+                    if content:
+                        # Process content for thinking tags
+                        async for chunk in self._process_thinking_tags(content, thinking_state):
+                            yield chunk
+                            
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse response line: {line}")
     
@@ -187,6 +207,13 @@ class LocalLLMProvider(LLMProvider):
         async with self.client.stream("POST", endpoint, json=payload) as response:
             response.raise_for_status()
             
+            # State for thinking parsing
+            thinking_state = {
+                "in_thinking": False,
+                "current_tag": None,
+                "buffer": ""
+            }
+            
             async for line in response.aiter_lines():
                 if not line.strip():
                     continue
@@ -194,15 +221,156 @@ class LocalLLMProvider(LLMProvider):
                 try:
                     data = json.loads(line)
                     
+                    # Check for explicit thinking field (Ollama native)
+                    if "thinking" in data and data["thinking"]:
+                         yield f"<<<THINKING>>>{data['thinking']}"
+                         # Some models might send both thinking field and content field
+                         # Continue to process content if present
+                    
                     # Extract the generated text
+                    content = ""
                     if "response" in data:
-                        yield data["response"]
+                        content = data["response"]
                     elif "message" in data and "content" in data["message"]:
-                        yield data["message"]["content"]
+                        content = data["message"]["content"]
                     elif "error" in data:
                         yield f"Error: {data['error']}"
+                        continue
+                        
+                    if content:
+                        # Process content for thinking tags
+                        async for chunk in self._process_thinking_tags(content, thinking_state):
+                            yield chunk
+                            
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse response line: {line}")
+
+    async def _process_thinking_tags(self, content: str, state: Dict[str, Any]) -> AsyncGenerator[str, None]:
+        """
+        Process content for thinking tags like <think>, <reasoning>, <thought>
+        Handles split tags across chunks.
+        """
+        # Supported tags
+        tags = ["think", "reasoning", "thought"]
+        
+        # If we have a buffer (potential partial tag), prepend it
+        if state["buffer"]:
+            content = state["buffer"] + content
+            state["buffer"] = ""
+            
+        current_pos = 0
+        total_len = len(content)
+        
+        while current_pos < total_len:
+            # If we are inside a thinking block
+            if state["in_thinking"]:
+                tag = state["current_tag"]
+                close_tag = f"</{tag}>"
+                
+                # Look for closing tag
+                close_pos = content.find(close_tag, current_pos)
+                
+                if close_pos != -1:
+                    # Found closing tag
+                    # Yield everything up to the closing tag as thinking
+                    if close_pos > current_pos:
+                        yield f"<<<THINKING>>>{content[current_pos:close_pos]}"
+                    
+                    # Reset state
+                    state["in_thinking"] = False
+                    state["current_tag"] = None
+                    current_pos = close_pos + len(close_tag)
+                else:
+                    # Closing tag not found, might be split
+                    # Check if the end of content looks like a partial closing tag
+                    # e.g. "</", "</th", "</think"
+                    # Max length of a closing tag is around 13 chars </reasoning>
+                    remaining = content[current_pos:]
+                    
+                    # If remaining is very short, it could be a partial tag end
+                    if len(remaining) < 15:
+                        partial_match = False
+                        for t in tags:
+                            ct = f"</{t}>"
+                            for i in range(1, len(ct)):
+                                if remaining.endswith(ct[:i]):
+                                    # Found partial closing tag at end
+                                    # Yield content up to the partial tag start
+                                    valid_content = remaining[:-i]
+                                    if valid_content:
+                                        yield f"<<<THINKING>>>{valid_content}"
+                                    
+                                    state["buffer"] = remaining[-i:]
+                                    partial_match = True
+                                    current_pos = total_len # End loop
+                                    break
+                            if partial_match:
+                                break
+                        
+                        if partial_match:
+                            continue
+                            
+                    # No closing tag, yield all as thinking
+                    yield f"<<<THINKING>>>{remaining}"
+                    current_pos = total_len
+            else:
+                # We are NOT in a thinking block
+                # Look for opening tag
+                found_tag = None
+                start_pos = -1
+                
+                # Check for all tags, find the earliest one
+                earliest_pos = -1
+                
+                for tag in tags:
+                    open_tag = f"<{tag}>"
+                    pos = content.find(open_tag, current_pos)
+                    if pos != -1:
+                        if earliest_pos == -1 or pos < earliest_pos:
+                            earliest_pos = pos
+                            found_tag = tag
+                            start_pos = pos
+                
+                if found_tag:
+                    # Found an opening tag
+                    # Yield everything before it as normal content
+                    if start_pos > current_pos:
+                        yield content[current_pos:start_pos]
+                    
+                    # Set state
+                    state["in_thinking"] = True
+                    state["current_tag"] = found_tag
+                    current_pos = start_pos + len(f"<{found_tag}>")
+                else:
+                    # Opening tag not found
+                    # Check for partial opening tag at end
+                    remaining = content[current_pos:]
+                    
+                    if len(remaining) < 15:
+                        partial_match = False
+                        for t in tags:
+                            ot = f"<{t}>"
+                            for i in range(1, len(ot)):
+                                if remaining.endswith(ot[:i]):
+                                    # Found partial opening tag
+                                    # Yield content up to partial tag
+                                    valid_content = remaining[:-i]
+                                    if valid_content:
+                                        yield valid_content
+                                        
+                                    state["buffer"] = remaining[-i:]
+                                    partial_match = True
+                                    current_pos = total_len
+                                    break
+                            if partial_match:
+                                break
+                        
+                        if partial_match:
+                            continue
+                    
+                    # No tag, yield all as normal content
+                    yield remaining
+                    current_pos = total_len
     
     async def generate_complete(self, prompt: str, **kwargs) -> str:
         """

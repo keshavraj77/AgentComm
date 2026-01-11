@@ -1242,6 +1242,28 @@ class ChatWidget(QWidget):
         """
         # Only handle chunks from the current entity
         if self.current_entity_id == sender_id:
+            # Check for THINKING signal - route to loading indicator
+            if chunk.startswith("<<<THINKING>>>"):
+                thinking_text = chunk[14:]
+                
+                # Make sure loading indicator is visible
+                if not self.loading_indicator.isVisible():
+                    entity_type = "agent" if self.current_entity_type == "agent" else "llm"
+                    QMetaObject.invokeMethod(
+                        self.loading_indicator, "start_animation",
+                        Qt.ConnectionType.QueuedConnection,
+                        Q_ARG(str, entity_type)
+                    )
+                
+                # Update the loading indicator with the thinking content
+                # Use a specialized method if available, otherwise use custom status
+                QMetaObject.invokeMethod(
+                    self.loading_indicator, "set_thinking_status",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, thinking_text)
+                )
+                return
+
             # Check for STATUS signal - update loading indicator with custom status
             if chunk.startswith("<<<STATUS>>>"):
                 status_text = chunk[12:]

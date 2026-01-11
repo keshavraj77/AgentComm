@@ -110,12 +110,32 @@ class AnthropicProvider(LLMProvider):
             response = await loop.run_in_executor(None, create_completion)
             
             # Process the streaming response
+            current_block_type = "text"
+            
             for chunk in response:
-                if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text'):
+                # Handle extended thinking blocks (Claude 3.7+)
+                if hasattr(chunk, 'type'):
+                    if chunk.type == 'content_block_start':
+                        if hasattr(chunk, 'content_block') and hasattr(chunk.content_block, 'type'):
+                            current_block_type = chunk.content_block.type
+                            if current_block_type == 'thinking' and hasattr(chunk.content_block, 'thinking'):
+                                # Initial thinking content
+                                yield f"<<<THINKING>>>{chunk.content_block.thinking}"
+                    elif chunk.type == 'content_block_delta':
+                        if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'type'):
+                            if chunk.delta.type == 'thinking_delta' and hasattr(chunk.delta, 'thinking'):
+                                yield f"<<<THINKING>>>{chunk.delta.thinking}"
+                            elif chunk.delta.type == 'text_delta' and hasattr(chunk.delta, 'text'):
+                                yield chunk.delta.text
+                            # Fallback for generic delta if types match context
+                            elif hasattr(chunk.delta, 'text') and current_block_type == 'text':
+                                yield chunk.delta.text
+                            elif hasattr(chunk.delta, 'thinking') and current_block_type == 'thinking':
+                                yield f"<<<THINKING>>>{chunk.delta.thinking}"
+                
+                # Legacy/Standard block handling
+                elif hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text'):
                     yield chunk.delta.text
-                elif hasattr(chunk, 'type') and chunk.type == 'content_block_delta':
-                    if hasattr(chunk, 'delta') and hasattr(chunk.delta, 'text'):
-                        yield chunk.delta.text
         
         except Exception as e:
             logger.error(f"Error generating text from Claude: {e}")

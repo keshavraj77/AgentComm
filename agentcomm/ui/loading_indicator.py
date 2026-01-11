@@ -375,6 +375,57 @@ class LoadingIndicator(QWidget):
         self.message_label.setText(text)
 
     @pyqtSlot(str)
+    def set_thinking_status(self, thinking_text: str):
+        """
+        Set the status message from thinking content.
+        
+        Args:
+            thinking_text: The thinking content to display
+        """
+        # Truncate if too long (keeping the end is often more interesting for streaming)
+        # But for thinking, the beginning/current thought is vital.
+        # Let's show a fixed window or just the latest chunk if it was a stream? 
+        # Actually, the thinking_text usually comes in chunks.
+        # But typically set_custom_status replaces the whole text.
+        # If we are receiving chunks, we should probably append them or show the latest "thought".
+        # However, the providers are yielding <<<THINKING>>>chunk.
+        # So here we are receiving a CHUNK. 
+        # We should accumulate it?
+        # NO, the providers yield <<<THINKING>>>content.
+        # wait, local.py yields chunks: yield f"<<<THINKING>>>{content[current_pos:close_pos]}"
+        # So we get partial text. 
+        
+        # We need to maintain a buffer if we want to show "full" thought, 
+        # but the loading indicator is small. 
+        # Better approach: Show the current chunk as a fleeting thought glimpse.
+        # OR better: Accumulate locally in a buffer and show the last N chars.
+        
+        # Since this method is called frequently, let's keep it simple:
+        # Just display the incoming chunk if it's substantial, 
+        # or append to a small rolling buffer.
+        
+        # Actually, let's just format it nicely.
+        # Users want to see "thinking...".
+        # Note: The chunk might be small (tokens).
+        
+        # Let's clean the text
+        clean_text = thinking_text.strip()
+        if not clean_text:
+            return
+
+        # Format with a brain icon
+        display_text = f"🧠 {clean_text}"
+        
+        # Update the text widget directly
+        # We use a slightly different color or style for thinking
+        if hasattr(self, 'status_label'):
+             # If it's very long, truncate
+             if len(display_text) > 80:
+                 display_text = display_text[:77] + "..."
+             
+             self.status_label.setText(display_text)
+
+    @pyqtSlot(str)
     def set_custom_status(self, status_text: str):
         """
         Set a custom status message from the agent.

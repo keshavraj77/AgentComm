@@ -138,9 +138,16 @@ class GeminiProvider(LLMProvider):
                     yield chunk.text
                 elif hasattr(chunk, 'parts'):
                     for part in chunk.parts:
-                        if hasattr(part, 'text'):
+                        # Check for thought part (Gemini 2.0+)
+                        if hasattr(part, 'thought') and part.thought:
+                            yield f"<<<THINKING>>>{part.text}"
+                        elif hasattr(part, 'text'):
                             full_response += part.text
                             yield part.text
+                        elif hasattr(part, 'executable_code'):
+                             # Handle executable code as text for now
+                             # Or could yield special tag if we want to handle code execution
+                             pass
 
             logger.info(f"Gemini streaming complete. Total response length: {len(full_response)}")
             logger.debug(f"Full response: {full_response[:200]}...")
