@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QStatusBar, QToolBar, QMenu, QMenuBar, QApplication
+    QStatusBar, QToolBar, QMenu, QMenuBar, QApplication, QTabWidget
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QIcon
@@ -18,10 +18,13 @@ from pathlib import Path
 from agentcomm.core.session_manager import SessionManager
 from agentcomm.agents.agent_registry import AgentRegistry
 from agentcomm.llm.llm_router import LLMRouter
+from agentcomm.mcp.mcp_registry import MCPRegistry
 from agentcomm.ui.chat_widget import ChatWidget
 from agentcomm.ui.agent_selector import AgentSelector
 from agentcomm.ui.settings_dialog import SettingsDialog
 from agentcomm.ui.walkthrough import WalkthroughManager
+from agentcomm.ui.orchestration.workflow_panel import WorkflowPanel
+from agentcomm.orchestration.workflow_store import WorkflowStore
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +38,17 @@ class MainWindow(QMainWindow):
         session_manager: SessionManager,
         agent_registry: AgentRegistry,
         llm_router: LLMRouter,
+        mcp_registry: MCPRegistry,
         parent: Optional[QWidget] = None
     ):
         """
-        Initialize the main window
-        
+        Initialize main window
+
         Args:
             session_manager: Session manager instance
             agent_registry: Agent registry instance
             llm_router: LLM router instance
+            mcp_registry: MCP registry instance
             parent: Parent widget
         """
         super().__init__(parent)
@@ -51,6 +56,7 @@ class MainWindow(QMainWindow):
         self.session_manager = session_manager
         self.agent_registry = agent_registry
         self.llm_router = llm_router
+        self.mcp_registry = mcp_registry
         
         self.setWindowTitle("AgentComm")
         self.setMinimumSize(1000, 700)

@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 
 from agentcomm.agents.agent_registry import AgentRegistry, Agent, AgentAuthentication, AgentCapabilities
 from agentcomm.llm.llm_router import LLMRouter
+from agentcomm.mcp.mcp_registry import MCPRegistry, MCPServerConfig
 from agentcomm.ui.custom_dialogs import StyledMessageBox
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class SettingsDialog(QDialog):
         self,
         agent_registry: AgentRegistry,
         llm_router: LLMRouter,
+        mcp_registry: MCPRegistry,
         parent: Optional[QWidget] = None
     ):
         """
@@ -44,6 +46,7 @@ class SettingsDialog(QDialog):
         
         self.agent_registry = agent_registry
         self.llm_router = llm_router
+        self.mcp_registry = mcp_registry
 
         # Store references to LLM input fields for batch saving
         self.llm_inputs = {}
@@ -255,6 +258,11 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self.llms_tab, "LLMs")
         self.setup_llms_tab()
         
+        # Create the orchestration tab
+        self.orchestration_tab = QWidget()
+        self.tab_widget.addTab(self.orchestration_tab, "Orchestration")
+        self.setup_orchestration_tab()
+        
         # Create the general tab
         self.general_tab = QWidget()
         self.tab_widget.addTab(self.general_tab, "General")
@@ -344,6 +352,95 @@ class SettingsDialog(QDialog):
         
         # Load the LLMs
         self.load_llms()
+    def setup_orchestration_tab(self):
+        """
+        Set up the orchestration tab
+        """
+        from agentcomm.config.settings import Settings
+        from agentcomm.orchestration.checkpoint_manager import CheckpointManager
+        from PyQt6.QtWidgets import QMessageBox
+        
+        # Create the layout
+        layout = QVBoxLayout(self.orchestration_tab)
+
+        # Create scroll area for settings
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        container_layout = QVBoxLayout(container)
+
+        # Checkpointing Settings Group
+        checkpoint_group = QGroupBox("Workflow Checkpointing")
+        checkpoint_layout = QVBoxLayout()
+
+        # Enable checkpointing checkbox
+        self.checkpoint_enabled = QCheckBox("Enable workflow checkpointing")
+        settings = Settings()
+        self.checkpoint_enabled.setChecked(
+            settings.get('orchestration.enable_checkpointing', True)
+        )
+        self.checkpoint_enabled.setToolTip(
+            "Save workflow state at each step for recovery and debugging"
+        )
+        checkpoint_layout.addWidget(self.checkpoint_enabled)
+
+        # Database info
+        checkpoint_file = settings.get('orchestration.checkpoint_file', 'agentcomm/data/checkpoints.db')
+        db_info = QLabel(f"Database: {checkpoint_file}")
+        db_info.setStyleSheet("color: #a0aec0; font-size: 11px; padding: 5px;")
+        checkpoint_layout.addWidget(db_info)
+
+        # Database size
+        try:
+            manager = CheckpointManager(checkpoint_file)
+            size_mb = manager.get_db_size_mb()
+            size_label = QLabel(f"Database size: {size_mb:.2f} MB")
+            size_label.setStyleSheet("color: #a0aec0; font-size: 11px; padding: 5px;")
+            checkpoint_layout.addWidget(size_label)
+        except Exception as e:
+            logger.warning(f"Could not get checkpoint database size: {e}")
+
+        # Clear button
+        clear_btn = QPushButton("Clear All Checkpoints")
+        clear_btn.clicked.connect(self._clear_checkpoints)
+        clear_btn.setMaximumWidth(200)
+        checkpoint_layout.addWidget(clear_btn)
+
+        checkpoint_group.setLayout(checkpoint_layout)
+        container_layout.addWidget(checkpoint_group)
+
+        container_layout.addStretch()
+        scroll_area.setWidget(container)
+        layout.addWidget(scroll_area)
+
+    def _clear_checkpoints(self):
+        """Clear all checkpoints"""
+        from agentcomm.config.settings import Settings
+        from agentcomm.orchestration.checkpoint_manager import CheckpointManager
+        from PyQt6.QtWidgets import QMessageBox
+
+        reply = QMessageBox.question(
+            self,
+            "Clear Checkpoints",
+            "Delete all workflow checkpoints? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            settings = Settings()
+            checkpoint_file = settings.get('orchestration.checkpoint_file', 'agentcomm/data/checkpoints.db')
+            manager = CheckpointManager(checkpoint_file)
+            if manager.clear_all_checkpoints():
+                manager.vacuum_database()
+                QMessageBox.information(self, "Success", "Checkpoints cleared!")
+                # Refresh the tab to update size
+                self.setup_orchestration_tab()
+            else:
+                QMessageBox.warning(self, "Error", "Failed to clear checkpoints")
+
     
     def setup_general_tab(self):
         """
@@ -967,6 +1064,11 @@ class SettingsDialog(QDialog):
             settings.set("ngrok.enabled", self.ngrok_enabled_checkbox.isChecked())
             settings.set("ngrok.auth_token", self.ngrok_token_input.text())
             settings.set("ngrok.region", self.ngrok_region_combo.currentText())
+            
+            # Save orchestration settings
+            if hasattr(self, 'checkpoint_enabled'):
+                settings.set("orchestration.enable_checkpointing", self.checkpoint_enabled.isChecked())
+                logger.info(f"Saved orchestration settings: enable_checkpointing={self.checkpoint_enabled.isChecked()}")
 
             logger.info(f"Saved general settings: webhook_port={self.webhook_port_input.value()}, ngrok_enabled={self.ngrok_enabled_checkbox.isChecked()}")
 
@@ -1189,3 +1291,82 @@ class SettingsDialog(QDialog):
         except Exception as e:
             logger.error(f"Error extracting agent data from form: {e}")
             return None
+    def setup_mcp_tab(self):
+        """Set up the MCP servers tab"""
+        # Create layout
+        layout = QVBoxLayout(self.mcp_tab)
+
+        # Create MCP servers list
+        self.mcp_group = QGroupBox("MCP Servers")
+        mcp_layout = QVBoxLayout(self.mcp_group)
+
+        # Create a scroll area for MCP servers
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        container = QWidget()
+        container.setStyleSheet("background: transparent;")
+        container_layout = QVBoxLayout(container)
+
+        # Load MCP servers
+        self.load_mcp_servers()
+
+        container_layout.addStretch()
+        scroll_area.setWidget(container)
+        mcp_layout.addWidget(scroll_area)
+
+        self.mcp_group.setLayout(mcp_layout)
+        layout.addWidget(self.mcp_group)
+
+    def load_mcp_servers(self):
+        """Load MCP servers from config"""
+        try:
+            servers = self.mcp_registry.get_all_servers()
+            for server_config in servers:
+                self.create_mcp_server_widget(server_config)
+        except Exception as e:
+            logger.error(f"Error loading MCP servers: {e}")
+
+    def create_mcp_server_widget(self, server_config):
+        """Create a widget for an MCP server"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+
+        # Server name and enabled checkbox
+        info_layout = QVBoxLayout()
+        name_label = QLabel(server_config.name)
+        name_label.setStyleSheet("font-weight: bold; color: #ffffff;")
+        info_layout.addWidget(name_label)
+
+        enabled_checkbox = QCheckBox("Enable")
+        enabled_checkbox.setChecked(False)
+        enabled_checkbox.server_id = server_config.server_id
+        info_layout.addWidget(enabled_checkbox)
+
+        # Remove button
+        remove_button = QPushButton("✕")
+        remove_button.setFixedSize(24, 24)
+        remove_button.setStyleSheet("""
+            QPushButton {
+                background: #dc2626;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background: #ef4444;
+            }
+        """)
+        info_layout.addWidget(remove_button)
+
+        info_layout.addStretch()
+        layout.addWidget(info_layout)
+
+        # Transport info
+        transport_label = QLabel(f"Transport: {server_config.transport}")
+        transport_label.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        layout.addWidget(transport_label)
+
+        widget.setLayout(layout)
+        return widget

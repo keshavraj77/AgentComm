@@ -24,6 +24,11 @@ logger = logging.getLogger("agentcomm")
 data_dir = Path(__file__).parent / "data"
 data_dir.mkdir(exist_ok=True)
 
+# Ensure checkpoint directory exists
+checkpoint_dir = data_dir
+checkpoint_dir.mkdir(parents=True, exist_ok=True)
+logger.info(f"Data directory: {data_dir}")
+
 try:
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtCore import QTimer
@@ -35,6 +40,7 @@ try:
     from agentcomm.agents.ngrok_manager import NgrokManager
     from agentcomm.llm.llm_router import LLMRouter
     from agentcomm.config.settings import Settings
+    from agentcomm.mcp.mcp_registry import MCPRegistry, MCPServerConfig
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     logger.error("Please ensure all dependencies are installed by running: pip install -r requirements.txt")
@@ -80,13 +86,29 @@ async def main_coro(app):
             else:
                 logger.warning("ngrok is enabled but auth token is not configured")
 
+        # Initialize MCP registry
+        mcp_registry = MCPRegistry()
+
+        # Load MCP servers from config
+        mcp_config = config_store.get_mcp_servers()
+        if mcp_config and "mcp_servers" in mcp_config:
+            for server_data in mcp_config["mcp_servers"]:
+                try:
+                    server_config = MCPServerConfig(**server_data)
+                    mcp_registry.add_server(server_config)
+                    logger.info(f"Loaded MCP server: {server_config.server_id}")
+                except Exception as e:
+                    logger.error(f"Error loading MCP server {server_data}: {e}")
+            logger.info(f"Loaded {len(mcp_registry.servers)} MCP servers")
+
         # Initialize session manager
         session_manager = SessionManager(
             agent_registry,
             llm_router,
             system_prompt=system_prompt,
             webhook_handler=webhook_handler,
-            ngrok_manager=ngrok_manager
+            ngrok_manager=ngrok_manager,
+            mcp_registry=mcp_registry
         )
         
         # Start async components
@@ -110,7 +132,7 @@ async def main_coro(app):
         app.setApplicationName("A2A Client")
 
         # Create and show the main window
-        main_window = MainWindow(session_manager, agent_registry, llm_router)
+        main_window = MainWindow(session_manager, agent_registry, llm_router, mcp_registry)
         main_window.show()
 
         # Register cleanup function to save threads on exit

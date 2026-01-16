@@ -1,0 +1,30 @@
+{
+  "webhook_port": 8002,
+  "webhook_host": "localhost",
+  "default_agent": "interview_prep",
+  "default_llm_provider": "OpenAI",
+  "ngrok": {
+    "enabled": true,
+    "auth_token": "37D8fi0fyT37N5xmlUTtjtZ4eJp_87j6H23gy9ZNoaLAeqRRW",
+    "region": "us"
+  },
+  "orchestration": {
+    "enable_checkpointing": true,
+    "checkpoint_file": "agentcomm/data/checkpoints.db",
+    "auto_cleanup_days": 30
+  },
+  "ui": {
+    "theme": "light",
+    "font_size": 12,
+    "window_width": 800,
+    "window_height": 600,
+    "show_toolbar": true,
+    "show_statusbar": true
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "agentcomm.log",
+    "max_size": 1048576,
+    "backup_count": 3
+  }
+}

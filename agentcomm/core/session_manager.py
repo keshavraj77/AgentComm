@@ -15,6 +15,7 @@ from agentcomm.agents.ngrok_manager import NgrokManager
 from agentcomm.llm.llm_router import LLMRouter
 from agentcomm.llm.chat_history import ChatHistory
 from agentcomm.core.thread import Thread
+from agentcomm.mcp.mcp_registry import MCPRegistry, MCPServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +34,11 @@ class SessionManager:
         llm_router: LLMRouter,
         system_prompt: Optional[str] = None,
         webhook_handler: Optional[WebhookHandler] = None,
-        ngrok_manager: Optional[NgrokManager] = None
+        ngrok_manager: Optional[NgrokManager] = None,
+        mcp_registry: Optional[MCPRegistry] = None
     ):
         """
-        Initialize the session manager
+        Initialize session manager
 
         Args:
             agent_registry: Registry of available agents
@@ -44,18 +46,23 @@ class SessionManager:
             system_prompt: Optional system prompt for LLM interactions
             webhook_handler: Optional webhook handler for push notifications
             ngrok_manager: Optional ngrok manager for secure tunneling
+            mcp_registry: Optional MCP registry for managing MCP servers
         """
         self.agent_registry = agent_registry
         self.llm_router = llm_router
         self.agent_comm: Optional[AgentComm] = None
         self.webhook_handler = webhook_handler
         self.ngrok_manager = ngrok_manager
+        self.mcp_registry = mcp_registry or MCPRegistry()
         self.current_entity_id: Optional[str] = None
         self.current_entity_type: Optional[str] = None
         self.current_thread_id: Optional[str] = None
 
         # Threads structure: {entity_id: {thread_id: Thread}}
         self.threads: Dict[str, Dict[str, Thread]] = {}
+
+        # MCP servers enabled for current thread
+        self.enabled_mcp_servers: List[str] = []
 
         self.message_callbacks: List[Callable[[str, str, str], None]] = []
         self.streaming_callbacks: List[Callable[[str, str, str], None]] = []
@@ -127,6 +134,83 @@ class SessionManager:
             callback: Function to call when threads should be saved
         """
         self.auto_save_callback = callback
+
+    def enable_mcp_server(self, server_id: str) -> bool:
+        """
+        Enable an MCP server for the current thread
+
+        Args:
+            server_id: ID of the MCP server to enable
+
+        Returns:
+            True if enabled successfully, False otherwise
+        """
+        try:
+            if server_id not in self.mcp_registry.servers:
+                logger.error(f"MCP server {server_id} not found")
+                return False
+
+            if server_id not in self.enabled_mcp_servers:
+                self.enabled_mcp_servers.append(server_id)
+                logger.info(f"Enabled MCP server: {server_id}")
+
+            return True
+        except Exception as e:
+            logger.error(f"Error enabling MCP server {server_id}: {e}")
+            return False
+
+    def disable_mcp_server(self, server_id: str) -> bool:
+        """
+        Disable an MCP server for the current thread
+
+        Args:
+            server_id: ID of the MCP server to disable
+
+        Returns:
+            True if disabled successfully, False otherwise
+        """
+        try:
+            if server_id in self.enabled_mcp_servers:
+                self.enabled_mcp_servers.remove(server_id)
+                logger.info(f"Disabled MCP server: {server_id}")
+
+            return True
+        except Exception as e:
+            logger.error(f"Error disabling MCP server {server_id}: {e}")
+            return False
+
+    def get_enabled_mcp_servers(self) -> List[str]:
+        """
+        Get list of enabled MCP servers
+
+        Returns:
+            List of enabled MCP server IDs
+        """
+        return self.enabled_mcp_servers
+
+    def set_enabled_mcp_servers(self, server_ids: List[str]) -> bool:
+        """
+        Set the list of enabled MCP servers
+
+        Args:
+            server_ids: List of MCP server IDs to enable
+
+        Returns:
+            True if set successfully, False otherwise
+        """
+        try:
+            self.enabled_mcp_servers = []
+            for server_id in server_ids:
+                if server_id in self.mcp_registry.servers:
+                    self.enabled_mcp_servers.append(server_id)
+                else:
+                    logger.warning(f"MCP server {server_id} not found, skipping")
+
+            logger.info(f"Set enabled MCP servers: {self.enabled_mcp_servers}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting enabled MCP servers: {e}")
+            return False
 
     async def _start_ngrok_tunnel(self):
         """Start ngrok tunnel for webhook handler"""
@@ -470,10 +554,19 @@ class SessionManager:
                 logger.info(f"Sending message to LLM: {self.current_entity_id}")
                 logger.debug(f"Message: {message[:100]}...")
 
+                # Get MCP tools if any are enabled
+                tools = None
+                if self.enabled_mcp_servers:
+                    try:
+                        tools = await self.mcp_registry.get_tools_for_servers(self.enabled_mcp_servers)
+                        logger.info(f"Using {len(self.enabled_mcp_servers)} MCP servers with {len(tools)} tools")
+                    except Exception as e:
+                        logger.error(f"Error getting MCP tools: {e}")
+
                 if stream:
                     async for chunk in self.llm_router.generate_stream(
                         self.current_entity_id, message, history.get_messages() if history else None,
-                        system=self.system_prompt
+                        system=self.system_prompt, tools=tools
                     ):
                         for callback in self.streaming_callbacks:
                             callback(self.current_entity_id, chunk, "llm")
@@ -495,7 +588,7 @@ class SessionManager:
                 else:
                     response = await self.llm_router.generate(
                         self.current_entity_id, message, history.get_messages() if history else None,
-                        system=self.system_prompt
+                        system=self.system_prompt, tools=tools
                     )
                     logger.info(f"LLM response received (non-streaming). Length: {len(response)}")
 
