@@ -4,7 +4,7 @@ OpenAI Provider Implementation
 
 import os
 import logging
-from typing import Optional, AsyncGenerator, List
+from typing import Optional, AsyncGenerator, List, Dict, Any
 
 from agentcomm.llm.llm_provider import LLMProvider
 
@@ -43,13 +43,14 @@ class OpenAIProvider(LLMProvider):
             except ImportError:
                 logger.error("Failed to import openai package. Please install it with: pip install openai>=1.0.0")
 
-    async def generate(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]:
+    async def generate(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> AsyncGenerator[str, None]:
         """
-        Generate text from OpenAI, streaming the response
+        Generate text from OpenAI, streaming response
 
         Args:
-            prompt: The prompt to send to the model
-            **kwargs: Additional parameters to pass to the API
+            prompt: The prompt to send to model
+            tools: Optional list of tools/functions available to LLM
+            **kwargs: Additional parameters to pass to API
 
         Yields:
             Generated text chunks
@@ -72,6 +73,8 @@ class OpenAIProvider(LLMProvider):
 
             logger.info(f"OpenAI generate (streaming) - Model: {model}, Params: {params}")
             logger.debug(f"Prompt: {prompt[:100]}...")
+            if tools:
+                logger.debug(f"Tools provided: {len(tools)} tools")
 
             # Create messages
             messages = []
@@ -91,15 +94,23 @@ class OpenAIProvider(LLMProvider):
             # Add current user message
             messages.append({"role": "user", "content": prompt})
 
-            # Create streaming completion
-            stream = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True,
+            # Prepare API call parameters
+            api_params = {
+                "model": model,
+                "messages": messages,
+                "stream": True,
                 **params
-            )
+            }
 
-            # Process the streaming response
+            # Add tools if provided
+            if tools:
+                api_params["tools"] = tools
+                api_params["tool_choice"] = "auto"
+
+            # Create streaming completion
+            stream = self.client.chat.completions.create(**api_params)
+
+            # Process streaming response
             full_response = ""
             for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
@@ -114,13 +125,14 @@ class OpenAIProvider(LLMProvider):
             logger.error(f"Error generating text from OpenAI (streaming): {e}", exc_info=True)
             yield f"Error: {e}"
 
-    async def generate_complete(self, prompt: str, **kwargs) -> str:
+    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         """
-        Generate text from OpenAI, returning the complete response
+        Generate text from OpenAI, returning complete response
 
         Args:
-            prompt: The prompt to send to the model
-            **kwargs: Additional parameters to pass to the API
+            prompt: The prompt to send to model
+            tools: Optional list of tools/functions available to LLM
+            **kwargs: Additional parameters to pass to API
 
         Returns:
             Complete generated text
@@ -141,6 +153,8 @@ class OpenAIProvider(LLMProvider):
 
             logger.info(f"OpenAI generate_complete - Model: {model}, Params: {params}")
             logger.debug(f"Prompt: {prompt[:100]}...")
+            if tools:
+                logger.debug(f"Tools provided: {len(tools)} tools")
 
             # Create messages
             messages = []
@@ -160,13 +174,21 @@ class OpenAIProvider(LLMProvider):
             # Add current user message
             messages.append({"role": "user", "content": prompt})
 
-            # Create completion
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=False,
+            # Prepare API call parameters
+            api_params = {
+                "model": model,
+                "messages": messages,
+                "stream": False,
                 **params
-            )
+            }
+
+            # Add tools if provided
+            if tools:
+                api_params["tools"] = tools
+                api_params["tool_choice"] = "auto"
+
+            # Create completion
+            response = self.client.chat.completions.create(**api_params)
 
             # Extract content
             result = response.choices[0].message.content
