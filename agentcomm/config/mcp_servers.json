@@ -1,0 +1,32 @@
+{
+  "mcp_servers": [
+    {
+      "server_id": "filesystem",
+      "name": "Local Filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/keshavraj/personal/AgentComm"],
+      "env": {}
+    },
+    {
+      "server_id": "github",
+      "name": "GitHub",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": ""
+      }
+    },
+    {
+      "server_id": "brave-search",
+      "name": "Brave Search",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": ""
+      }
+    }
+  ]
+}
