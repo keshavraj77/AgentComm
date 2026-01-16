@@ -47,7 +47,7 @@ class AnthropicProvider(LLMProvider):
             except Exception as e:
                 logger.error(f"Error initializing Anthropic client: {e}")
     
-    async def generate(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]:
+    async def generate(self, prompt: str, tools: Optional[List[Dict[str, Any]] = None, **kwargs) -> AsyncGenerator[str, None]:
         """
         Generate text from Claude, streaming the response
         
@@ -103,6 +103,7 @@ class AnthropicProvider(LLMProvider):
                     messages=messages,
                     system=system,
                     stream=True,
+                    tools=tools,
                     **params
                 )
             
@@ -141,7 +142,7 @@ class AnthropicProvider(LLMProvider):
             logger.error(f"Error generating text from Claude: {e}")
             yield f"Error: {e}"
     
-    async def generate_complete(self, prompt: str, **kwargs) -> str:
+    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         """
         Generate text from Claude, returning the complete response
         
@@ -196,6 +197,7 @@ class AnthropicProvider(LLMProvider):
                     messages=messages,
                     system=system,
                     stream=False,
+                    tools=tools,
                     **params
                 )
             
