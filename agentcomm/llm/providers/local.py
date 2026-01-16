@@ -50,7 +50,7 @@ class LocalLLMProvider(LLMProvider):
         self.client = httpx.AsyncClient(timeout=60.0)
         logger.info(f"Local LLM provider initialized with host: {host}, API type: {self.api_type}")
     
-    async def generate(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]:
+    async def generate(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> AsyncGenerator[str, None]:
         """
         Generate text from local LLM, streaming the response
         
@@ -102,7 +102,8 @@ class LocalLLMProvider(LLMProvider):
         payload = {
             "model": model,
             "messages": messages,
-            "stream": True,
+            "tools": tools or [],
+                "stream": True,
             "temperature": kwargs.get("temperature", self.default_params["temperature"]),
             "max_tokens": kwargs.get("max_tokens", self.default_params["max_tokens"]),
             "top_p": kwargs.get("top_p", self.default_params["top_p"])
@@ -172,7 +173,8 @@ class LocalLLMProvider(LLMProvider):
         payload = {
             "model": model,
             "prompt": prompt,
-            "stream": True,
+            "tools": tools or [],
+                "stream": True,
             **params
         }
         
@@ -372,7 +374,7 @@ class LocalLLMProvider(LLMProvider):
                     yield remaining
                     current_pos = total_len
     
-    async def generate_complete(self, prompt: str, **kwargs) -> str:
+    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         """
         Generate text from local LLM, returning the complete response
         
@@ -423,6 +425,7 @@ class LocalLLMProvider(LLMProvider):
             "model": model,
             "messages": messages,
             "stream": False,
+                "tools": tools or []
             "temperature": kwargs.get("temperature", self.default_params["temperature"]),
             "max_tokens": kwargs.get("max_tokens", self.default_params["max_tokens"]),
             "top_p": kwargs.get("top_p", self.default_params["top_p"])
@@ -465,6 +468,7 @@ class LocalLLMProvider(LLMProvider):
             "model": model,
             "prompt": prompt,
             "stream": False,
+                "tools": tools or []
             **params
         }
         
