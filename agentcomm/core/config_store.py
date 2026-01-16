@@ -33,6 +33,7 @@ class ConfigStore:
         self.agents_file = self.config_dir / "agents.json"
         self.llm_config_file = self.config_dir / "llm_config.json"
         self.threads_file = self.config_dir / "threads.json"
+        self.mcp_servers_file = self.config_dir / "mcp_servers.json"
 
         # Initialize config files from examples if they don't exist
         self._initialize_config_files()
@@ -41,6 +42,7 @@ class ConfigStore:
         self.agents_config = self._load_config(self.agents_file)
         self.llm_config = self._load_config(self.llm_config_file)
         self.threads_config = self._load_config(self.threads_file)
+        self.mcp_servers_config = self._load_config(self.mcp_servers_file)
 
         logger.info(f"Configuration loaded from {self.config_dir}")
 
@@ -91,7 +93,7 @@ class ConfigStore:
         Save configuration to a JSON file
 
         Args:
-            config_type: Type of configuration to save ('agents', 'llm', or 'threads')
+            config_type: Type of configuration to save ('agents', 'llm', 'threads', or 'mcp_servers')
 
         Returns:
             True if successful, False otherwise
@@ -106,6 +108,9 @@ class ConfigStore:
             elif config_type == 'threads':
                 with open(self.threads_file, 'w') as f:
                     json.dump(self.threads_config, f, indent=2)
+            elif config_type == 'mcp_servers':
+                with open(self.mcp_servers_file, 'w') as f:
+                    json.dump(self.mcp_servers_config, f, indent=2)
             else:
                 logger.error(f"Unknown configuration type: {config_type}")
                 return False
@@ -198,6 +203,32 @@ class ConfigStore:
             return self.save_config('threads')
         except Exception as e:
             logger.error(f"Error saving threads: {e}")
+            return False
+
+    def get_mcp_servers(self) -> Dict[str, Any]:
+        """
+        Get MCP servers configuration
+
+        Returns:
+            Dict containing MCP servers configuration
+        """
+        return self.mcp_servers_config
+
+    def save_mcp_servers(self, mcp_servers_data: Dict[str, Any]) -> bool:
+        """
+        Save MCP servers configuration
+
+        Args:
+            mcp_servers_data: MCP servers data to save
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.mcp_servers_config = mcp_servers_data
+            return self.save_config('mcp_servers')
+        except Exception as e:
+            logger.error(f"Error saving MCP servers: {e}")
             return False
 
 
