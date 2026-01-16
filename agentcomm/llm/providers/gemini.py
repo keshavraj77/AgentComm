@@ -45,7 +45,7 @@ class GeminiProvider(LLMProvider):
             except ImportError:
                 logger.error("Failed to import google.generativeai package. Please install it with: pip install google-generativeai>=0.3.0")
     
-    async def generate(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]:
+    async def generate(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> AsyncGenerator[str, None]:
         """
         Generate text from Gemini, streaming the response
 
@@ -125,7 +125,7 @@ class GeminiProvider(LLMProvider):
             else:
                 # Generate content directly
                 def generate_content():
-                    return model_obj.generate_content(content, stream=True, generation_config=params)
+                    return model_obj.generate_content(content, stream=True, generation_config=params, tools=tools)
 
                 # Get the streaming response
                 response = await loop.run_in_executor(None, generate_content)
@@ -156,7 +156,7 @@ class GeminiProvider(LLMProvider):
             logger.error(f"Error generating text from Gemini (streaming): {e}", exc_info=True)
             yield f"Error: {e}"
     
-    async def generate_complete(self, prompt: str, **kwargs) -> str:
+    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         """
         Generate text from Gemini, returning the complete response
 
@@ -234,7 +234,7 @@ class GeminiProvider(LLMProvider):
             else:
                 # Generate content directly
                 def generate_content():
-                    return model_obj.generate_content(content, generation_config=params)
+                    return model_obj.generate_content(content, generation_config=params, tools=tools)
 
                 # Get the response
                 response = await loop.run_in_executor(None, generate_content)
