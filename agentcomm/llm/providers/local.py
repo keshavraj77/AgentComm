@@ -63,17 +63,17 @@ class LocalLLMProvider(LLMProvider):
         """
         try:
             if self.api_type == "openai":
-                async for chunk in self._generate_openai(prompt, **kwargs):
+                async for chunk in self._generate_openai(prompt, tools=tools, **kwargs):
                     yield chunk
             else:
-                async for chunk in self._generate_ollama(prompt, **kwargs):
+                async for chunk in self._generate_ollama(prompt, tools=tools, **kwargs):
                     yield chunk
         
         except Exception as e:
             logger.error(f"Error generating text from local LLM: {e}")
             yield f"Error: {e}"
     
-    async def _generate_openai(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]:
+    async def _generate_openai(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> AsyncGenerator[str, None]:
         """
         Generate text using OpenAI-compatible API
         """
@@ -94,16 +94,17 @@ class LocalLLMProvider(LLMProvider):
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
                 messages.append({"role": role, "content": content})
-        
-        # Add the current message
-        messages.append({"role": "user", "content": prompt})
-        
+
+        # Add the current message (only if not empty - for tool calling loop)
+        if prompt:
+            messages.append({"role": "user", "content": prompt})
+
         # Prepare request payload
         payload = {
             "model": model,
             "messages": messages,
             "tools": tools or [],
-                "stream": True,
+            "stream": True,
             "temperature": kwargs.get("temperature", self.default_params["temperature"]),
             "max_tokens": kwargs.get("max_tokens", self.default_params["max_tokens"]),
             "top_p": kwargs.get("top_p", self.default_params["top_p"])
@@ -158,7 +159,7 @@ class LocalLLMProvider(LLMProvider):
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse response line: {line}")
     
-    async def _generate_ollama(self, prompt: str, **kwargs) -> AsyncGenerator[str, None]:
+    async def _generate_ollama(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> AsyncGenerator[str, None]:
         """
         Generate text using Ollama API
         """
@@ -174,7 +175,7 @@ class LocalLLMProvider(LLMProvider):
             "model": model,
             "prompt": prompt,
             "tools": tools or [],
-                "stream": True,
+            "stream": True,
             **params
         }
         
@@ -191,10 +192,11 @@ class LocalLLMProvider(LLMProvider):
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
                 messages.append({"role": role, "content": content})
-            
-            # Add the current message
-            messages.append({"role": "user", "content": prompt})
-            
+
+            # Add the current message (only if not empty - for tool calling loop)
+            if prompt:
+                messages.append({"role": "user", "content": prompt})
+
             # Update payload to use messages instead of prompt
             payload.pop("prompt", None)
             payload["messages"] = messages
@@ -374,108 +376,166 @@ class LocalLLMProvider(LLMProvider):
                     yield remaining
                     current_pos = total_len
     
-    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
+    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs):
         """
         Generate text from local LLM, returning the complete response
-        
+
         Args:
             prompt: The prompt to send to the model
-            **kwargs: Additional parameters to pass to the API
-            
+            tools: Optional list of tool definitions
+            **kwargs: Additional parameters including:
+                - return_tool_calls: If True, returns Dict[str, Any] with 'content' and 'tool_calls'
+                                     If False, returns str with just content
+
         Returns:
-            Complete generated text
+            Complete generated text (str) or structured response (dict) depending on return_tool_calls
         """
         try:
+            return_tool_calls = kwargs.get("return_tool_calls", False)
+
             if self.api_type == "openai":
-                return await self._generate_complete_openai(prompt, **kwargs)
+                result = await self._generate_complete_openai(prompt, tools=tools, **kwargs)
             else:
-                return await self._generate_complete_ollama(prompt, **kwargs)
-        
+                result = await self._generate_complete_ollama(prompt, tools=tools, **kwargs)
+
+            return result
+
         except Exception as e:
             logger.error(f"Error generating text from local LLM: {e}")
-            return f"Error: {e}"
+            error_msg = f"Error: {e}"
+            if kwargs.get("return_tool_calls", False):
+                return {"content": error_msg, "tool_calls": []}
+            return error_msg
     
-    async def _generate_complete_openai(self, prompt: str, **kwargs) -> str:
+    async def _generate_complete_openai(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         """
         Generate complete text using OpenAI-compatible API
+
+        Returns str if return_tool_calls=False, otherwise returns Dict with content and tool_calls
         """
         model = kwargs.get("model", self.default_model)
-        
+        return_tool_calls = kwargs.get("return_tool_calls", False)
+
         # Build messages array
         messages = []
-        
+
         # Add system message if provided
         system = kwargs.get("system", "")
         if system:
             messages.append({"role": "system", "content": system})
-        
+
         # Add chat history if provided
         chat_history = kwargs.get("chat_history")
         if chat_history and isinstance(chat_history, list):
             for msg in chat_history:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
-                messages.append({"role": role, "content": content})
-        
-        # Add the current message
-        messages.append({"role": "user", "content": prompt})
-        
+
+                # Handle tool result messages
+                if role == "tool":
+                    messages.append({
+                        "role": "tool",
+                        "content": content,
+                        "tool_call_id": msg.get("tool_call_id", ""),
+                        "name": msg.get("name", "")
+                    })
+                # Handle assistant messages with tool calls
+                elif role == "assistant":
+                    msg_dict = {"role": "assistant", "content": content}
+                    if "tool_calls" in msg:
+                        msg_dict["tool_calls"] = msg["tool_calls"]
+                    messages.append(msg_dict)
+                else:
+                    messages.append({"role": role, "content": content})
+
+        # Add the current message (only if not empty - for tool calling loop)
+        if prompt:
+            messages.append({"role": "user", "content": prompt})
+
         # Prepare request payload
         payload = {
             "model": model,
             "messages": messages,
             "stream": False,
-                "tools": tools or []
             "temperature": kwargs.get("temperature", self.default_params["temperature"]),
             "max_tokens": kwargs.get("max_tokens", self.default_params["max_tokens"]),
             "top_p": kwargs.get("top_p", self.default_params["top_p"])
         }
-        
+
+        # Only add tools if provided
+        if tools and len(tools) > 0:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
         endpoint = f"{self.host}/chat/completions"
-        
+
         # Send the request
         response = await self.client.post(endpoint, json=payload)
         response.raise_for_status()
-        
+
         # Parse the response
         data = response.json()
-        
+
         # Extract the generated text from OpenAI format
         if "choices" in data and len(data["choices"]) > 0:
             message = data["choices"][0].get("message", {})
-            content = message.get("content", "")
+            content = message.get("content", "") or ""
+            tool_calls = message.get("tool_calls", [])
+
+            # If tool calls are present and requested, return structured response
+            if return_tool_calls and (tool_calls or content):
+                return {
+                    "content": content,
+                    "tool_calls": tool_calls
+                }
+
+            # Otherwise return just content
             if content:
                 return content
-        
+
+            # If only tool calls, indicate that
+            if tool_calls:
+                return "[Tool calls requested - use return_tool_calls=True to access them]"
+
         if "error" in data:
+            if return_tool_calls:
+                return {"content": f"Error: {data['error']}", "tool_calls": []}
             return f"Error: {data['error']}"
-        
+
+        if return_tool_calls:
+            return {"content": "Error: Could not extract content from response", "tool_calls": []}
         return "Error: Could not extract content from response"
     
-    async def _generate_complete_ollama(self, prompt: str, **kwargs) -> str:
+    async def _generate_complete_ollama(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
         """
         Generate complete text using Ollama API
+
+        Returns str if return_tool_calls=False, otherwise returns Dict with content and tool_calls
         """
         model = kwargs.get("model", self.default_model)
+        return_tool_calls = kwargs.get("return_tool_calls", False)
         params = self.default_params.copy()
         params.update({k: v for k, v in kwargs.items() if k in self.default_params})
-        
+
         # Create the system prompt if provided
         system = kwargs.get("system", "")
-        
+
         # Create the request payload
         payload = {
             "model": model,
             "prompt": prompt,
             "stream": False,
-                "tools": tools or []
             **params
         }
-        
+
+        # Only add tools if provided
+        if tools and len(tools) > 0:
+            payload["tools"] = tools
+
         # Add system message if provided
         if system:
             payload["system"] = system
-        
+
         # Add chat history if provided
         chat_history = kwargs.get("chat_history")
         if chat_history and isinstance(chat_history, list):
@@ -484,36 +544,79 @@ class LocalLLMProvider(LLMProvider):
             for msg in chat_history:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
-                messages.append({"role": role, "content": content})
-            
-            # Add the current message
-            messages.append({"role": "user", "content": prompt})
-            
+
+                # Handle tool result messages
+                if role == "tool":
+                    messages.append({
+                        "role": "tool",
+                        "content": content,
+                        "name": msg.get("name", "")
+                    })
+                # Handle assistant messages with tool calls
+                elif role == "assistant":
+                    msg_dict = {"role": "assistant", "content": content}
+                    if "tool_calls" in msg:
+                        msg_dict["tool_calls"] = msg["tool_calls"]
+                    messages.append(msg_dict)
+                else:
+                    messages.append({"role": role, "content": content})
+
+            # Add the current message (only if not empty - for tool calling loop)
+            if prompt:
+                messages.append({"role": "user", "content": prompt})
+
             # Update payload to use messages instead of prompt
             payload.pop("prompt", None)
             payload["messages"] = messages
-        
+
         # Determine the API endpoint based on whether we're using chat or completion
         if "messages" in payload:
             endpoint = f"{self.host}/api/chat"
         else:
             endpoint = f"{self.host}/api/generate"
-        
+
         # Send the request
         response = await self.client.post(endpoint, json=payload)
         response.raise_for_status()
-        
+
         # Parse the response
         data = response.json()
-        
-        # Extract the generated text
+
+        # Extract the generated text and tool calls
+        content = ""
+        tool_calls = []
+
         if "response" in data:
-            return data["response"]
-        elif "message" in data and "content" in data["message"]:
-            return data["message"]["content"]
+            content = data["response"]
+        elif "message" in data:
+            msg = data["message"]
+            content = msg.get("content", "") or ""
+            # Ollama may return tool_calls in the message
+            if "tool_calls" in msg:
+                tool_calls = msg["tool_calls"]
         elif "error" in data:
-            return f"Error: {data['error']}"
-        
+            error_msg = f"Error: {data['error']}"
+            if return_tool_calls:
+                return {"content": error_msg, "tool_calls": []}
+            return error_msg
+
+        # Return structured response if tool calls requested
+        if return_tool_calls:
+            return {
+                "content": content,
+                "tool_calls": tool_calls
+            }
+
+        # Otherwise return just content
+        if content:
+            return content
+
+        # If only tool calls, indicate that
+        if tool_calls:
+            return "[Tool calls requested - use return_tool_calls=True to access them]"
+
+        if return_tool_calls:
+            return {"content": "Error: Could not extract content from response", "tool_calls": []}
         return "Error: Could not extract content from response"
     
     @property
