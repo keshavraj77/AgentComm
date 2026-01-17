@@ -16,6 +16,7 @@ from agentcomm.llm.llm_router import LLMRouter
 from agentcomm.llm.chat_history import ChatHistory
 from agentcomm.core.thread import Thread
 from agentcomm.mcp.mcp_registry import MCPRegistry, MCPServerConfig
+from agentcomm.config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,8 @@ class SessionManager:
         system_prompt: Optional[str] = None,
         webhook_handler: Optional[WebhookHandler] = None,
         ngrok_manager: Optional[NgrokManager] = None,
-        mcp_registry: Optional[MCPRegistry] = None
+        mcp_registry: Optional[MCPRegistry] = None,
+        settings: Optional[Settings] = None
     ):
         """
         Initialize session manager
@@ -54,6 +56,7 @@ class SessionManager:
         self.webhook_handler = webhook_handler
         self.ngrok_manager = ngrok_manager
         self.mcp_registry = mcp_registry or MCPRegistry()
+        self.settings = settings or Settings()
         self.current_entity_id: Optional[str] = None
         self.current_entity_type: Optional[str] = None
         self.current_thread_id: Optional[str] = None
@@ -61,8 +64,8 @@ class SessionManager:
         # Threads structure: {entity_id: {thread_id: Thread}}
         self.threads: Dict[str, Dict[str, Thread]] = {}
 
-        # MCP servers enabled for current thread
-        self.enabled_mcp_servers: List[str] = []
+        # MCP servers enabled for current thread - Load from settings
+        self.enabled_mcp_servers: List[str] = self.settings.get("mcp.enabled_servers", [])
 
         self.message_callbacks: List[Callable[[str, str, str], None]] = []
         self.streaming_callbacks: List[Callable[[str, str, str], None]] = []
@@ -152,6 +155,7 @@ class SessionManager:
 
             if server_id not in self.enabled_mcp_servers:
                 self.enabled_mcp_servers.append(server_id)
+                self.settings.set("mcp.enabled_servers", self.enabled_mcp_servers)
                 logger.info(f"Enabled MCP server: {server_id}")
 
             return True
@@ -172,6 +176,7 @@ class SessionManager:
         try:
             if server_id in self.enabled_mcp_servers:
                 self.enabled_mcp_servers.remove(server_id)
+                self.settings.set("mcp.enabled_servers", self.enabled_mcp_servers)
                 logger.info(f"Disabled MCP server: {server_id}")
 
             return True
@@ -206,11 +211,17 @@ class SessionManager:
                 else:
                     logger.warning(f"MCP server {server_id} not found, skipping")
 
+            self.settings.set("mcp.enabled_servers", self.enabled_mcp_servers)
             logger.info(f"Set enabled MCP servers: {self.enabled_mcp_servers}")
             return True
         except Exception as e:
             logger.error(f"Error setting enabled MCP servers: {e}")
             return False
+
+    def refresh_mcp_settings(self):
+        """Reload MCP settings from global settings"""
+        self.enabled_mcp_servers = self.settings.get("mcp.enabled_servers", [])
+        logger.info(f"Reloaded enabled MCP servers: {self.enabled_mcp_servers}")
 
     async def _start_ngrok_tunnel(self):
         """Start ngrok tunnel for webhook handler"""
@@ -477,6 +488,18 @@ class SessionManager:
         if self.current_entity_id and self.current_thread_id:
             return self.threads.get(self.current_entity_id, {}).get(self.current_thread_id)
         return None
+
+    def get_all_threads(self) -> List[Thread]:
+        """
+        Get all threads across all entities
+
+        Returns:
+            List of all Thread objects
+        """
+        all_threads = []
+        for entity_threads in self.threads.values():
+            all_threads.extend(entity_threads.values())
+        return all_threads
 
     def get_current_chat_history(self) -> Optional[ChatHistory]:
         """

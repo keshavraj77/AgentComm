@@ -41,6 +41,7 @@ try:
     from agentcomm.llm.llm_router import LLMRouter
     from agentcomm.config.settings import Settings
     from agentcomm.mcp.mcp_registry import MCPRegistry, MCPServerConfig
+    from agentcomm.orchestration.workflow_store import WorkflowStore
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     logger.error("Please ensure all dependencies are installed by running: pip install -r requirements.txt")
@@ -108,7 +109,8 @@ async def main_coro(app):
             system_prompt=system_prompt,
             webhook_handler=webhook_handler,
             ngrok_manager=ngrok_manager,
-            mcp_registry=mcp_registry
+            mcp_registry=mcp_registry,
+            settings=settings
         )
         
         # Start async components
@@ -128,11 +130,21 @@ async def main_coro(app):
 
         session_manager.register_auto_save_callback(auto_save)
 
+        # Initialize workflow store
+        workflow_store = WorkflowStore()
+        logger.info("Workflow store initialized")
+
         # setApplicationName
         app.setApplicationName("A2A Client")
 
         # Create and show the main window
-        main_window = MainWindow(session_manager, agent_registry, llm_router, mcp_registry)
+        main_window = MainWindow(
+            session_manager=session_manager,
+            agent_registry=agent_registry,
+            llm_router=llm_router,
+            mcp_registry=mcp_registry,
+            workflow_store=workflow_store
+        )
         main_window.show()
 
         # Register cleanup function to save threads on exit

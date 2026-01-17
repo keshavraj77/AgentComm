@@ -268,6 +268,11 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(self.general_tab, "General")
         self.setup_general_tab()
         
+        # Create the MCP tab
+        self.mcp_tab = QWidget()
+        self.tab_widget.addTab(self.mcp_tab, "MCP Servers")
+        self.setup_mcp_tab()
+        
         # Create the buttons
         self.button_layout = QHBoxLayout()
         self.button_layout.addStretch()
@@ -1296,8 +1301,8 @@ class SettingsDialog(QDialog):
         # Create layout
         layout = QVBoxLayout(self.mcp_tab)
 
-        # Create MCP servers list
-        self.mcp_group = QGroupBox("MCP Servers")
+        # Create MCP servers group
+        self.mcp_group = QGroupBox("Registered MCP Servers")
         mcp_layout = QVBoxLayout(self.mcp_group)
 
         # Create a scroll area for MCP servers
@@ -1305,68 +1310,163 @@ class SettingsDialog(QDialog):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        container = QWidget()
-        container.setStyleSheet("background: transparent;")
-        container_layout = QVBoxLayout(container)
+        self.mcp_container = QWidget()
+        self.mcp_container.setStyleSheet("background: transparent;")
+        self.mcp_container_layout = QVBoxLayout(self.mcp_container)
+        self.mcp_container_layout.setContentsMargins(0, 0, 0, 0)
+        
+        scroll_area.setWidget(self.mcp_container)
+        mcp_layout.addWidget(scroll_area)
 
+        # Add Server button
+        self.add_mcp_button = QPushButton("➕ Add MCP Server")
+        self.add_mcp_button.clicked.connect(self.add_mcp_server)
+        mcp_layout.addWidget(self.add_mcp_button)
+
+        layout.addWidget(self.mcp_group)
+        
         # Load MCP servers
         self.load_mcp_servers()
 
-        container_layout.addStretch()
-        scroll_area.setWidget(container)
-        mcp_layout.addWidget(scroll_area)
+    def add_mcp_server(self):
+        """Show dialog to add a new MCP server"""
+        from agentcomm.ui.mcp_settings import MCPServerDialog
+        dialog = MCPServerDialog(parent=self)
+        dialog.server_configured.connect(self._on_mcp_server_added)
+        dialog.exec()
 
-        self.mcp_group.setLayout(mcp_layout)
-        layout.addWidget(self.mcp_group)
+    def _on_mcp_server_added(self, config):
+        """Handle new MCP server configuration"""
+        self.mcp_registry.add_server(config)
+        self.load_mcp_servers()
+        self.settings_changed.emit()
 
     def load_mcp_servers(self):
-        """Load MCP servers from config"""
+        """Load MCP servers into the UI"""
+        # Clear existing widgets
+        while self.mcp_container_layout.count():
+            item = self.mcp_container_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        
+        # Add servers
         try:
             servers = self.mcp_registry.get_all_servers()
             for server_config in servers:
-                self.create_mcp_server_widget(server_config)
+                widget = self.create_mcp_server_widget(server_config)
+                self.mcp_container_layout.addWidget(widget)
+            
+            # Add stretch at the end
+            self.mcp_container_layout.addStretch()
         except Exception as e:
             logger.error(f"Error loading MCP servers: {e}")
 
     def create_mcp_server_widget(self, server_config):
         """Create a widget for an MCP server"""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-
-        # Server name and enabled checkbox
-        info_layout = QVBoxLayout()
-        name_label = QLabel(server_config.name)
-        name_label.setStyleSheet("font-weight: bold; color: #ffffff;")
-        info_layout.addWidget(name_label)
-
-        enabled_checkbox = QCheckBox("Enable")
-        enabled_checkbox.setChecked(False)
-        enabled_checkbox.server_id = server_config.server_id
-        info_layout.addWidget(enabled_checkbox)
-
-        # Remove button
-        remove_button = QPushButton("✕")
-        remove_button.setFixedSize(24, 24)
-        remove_button.setStyleSheet("""
-            QPushButton {
-                background: #dc2626;
-                border: none;
-                border-radius: 4px;
-                padding: 4px;
+        from agentcomm.mcp.mcp_registry import MCPServerConfig
+        
+        widget = QGroupBox(server_config.name)
+        widget.setStyleSheet("""
+            QGroupBox {
+                background: rgba(45, 55, 72, 0.3);
+                border: 1px solid #4a5568;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 15px;
             }
-            QPushButton:hover {
-                background: #ef4444;
+            QGroupBox::title {
+                color: #a5b4fc;
+                subcontrol-origin: margin;
+                padding: 0 5px;
             }
         """)
-        info_layout.addWidget(remove_button)
-
-        info_layout.addStretch()
-        layout.addWidget(info_layout)
-
-        # Transport info
-        transport_label = QLabel(f"Transport: {server_config.transport}")
-        transport_label.setStyleSheet("color: #9ca3af; font-size: 11px;")
-        layout.addWidget(transport_label)
-
-        widget.setLayout(layout)
+        
+        # Server header with enable checkbox
+        header_layout = QHBoxLayout()
+        name_label = QLabel(f"<b>{server_config.name}</b>")
+        name_label.setStyleSheet("color: #ffffff; font-size: 14px;")
+        header_layout.addWidget(name_label)
+        
+        header_layout.addStretch()
+        
+        enabled_checkbox = QCheckBox("Enabled Globally")
+        from agentcomm.config.settings import Settings
+        settings = Settings()
+        enabled_servers = settings.get("mcp.enabled_servers", [])
+        enabled_checkbox.setChecked(server_config.server_id in enabled_servers)
+        enabled_checkbox.toggled.connect(lambda checked: self._toggle_mcp_server(server_config.server_id, checked))
+        header_layout.addWidget(enabled_checkbox)
+        
+        layout.addLayout(header_layout)
+        
+        if server_config.transport == "stdio":
+            cmd_label = QLabel(f"<b>Command:</b> {server_config.command} {' '.join(server_config.args or [])}")
+        else:
+            cmd_label = QLabel(f"<b>URL:</b> {server_config.url}")
+        cmd_label.setStyleSheet("color: #9ca3af; font-size: 11px;")
+        cmd_label.setWordWrap(True)
+        layout.addWidget(cmd_label)
+        
+        # Controls
+        controls_layout = QHBoxLayout()
+        
+        edit_button = QPushButton("Edit")
+        edit_button.setFixedWidth(80)
+        edit_button.clicked.connect(lambda: self.edit_mcp_server(server_config))
+        controls_layout.addWidget(edit_button)
+        
+        remove_button = QPushButton("Remove")
+        remove_button.setFixedWidth(80)
+        remove_button.setStyleSheet("background: #991b1b;")
+        remove_button.clicked.connect(lambda: self.remove_mcp_server(server_config.server_id))
+        controls_layout.addWidget(remove_button)
+        
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+        
         return widget
+
+    def edit_mcp_server(self, config):
+        """Show dialog to edit an MCP server"""
+        from agentcomm.ui.mcp_settings import MCPServerDialog
+        dialog = MCPServerDialog(config=config, parent=self)
+        dialog.server_configured.connect(self._on_mcp_server_added)
+        dialog.exec()
+
+    def remove_mcp_server(self, server_id):
+        """Remove an MCP server"""
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self, "Confirm Removal",
+            f"Are you sure you want to remove MCP server '{server_id}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            # Also remove from enabled list if it was there
+            from agentcomm.config.settings import Settings
+            settings = Settings()
+            enabled = settings.get("mcp.enabled_servers", [])
+            if server_id in enabled:
+                enabled.remove(server_id)
+                settings.set("mcp.enabled_servers", enabled)
+            
+            self.mcp_registry.remove_server(server_id)
+            self.load_mcp_servers()
+            self.settings_changed.emit()
+
+    def _toggle_mcp_server(self, server_id, enabled):
+        """Toggle MCP server global enabled state"""
+        from agentcomm.config.settings import Settings
+        settings = Settings()
+        enabled_servers = settings.get("mcp.enabled_servers", [])
+        
+        if enabled:
+            if server_id not in enabled_servers:
+                enabled_servers.append(server_id)
+        else:
+            if server_id in enabled_servers:
+                enabled_servers.remove(server_id)
+        
+        settings.set("mcp.enabled_servers", enabled_servers)
+        self.settings_changed.emit()

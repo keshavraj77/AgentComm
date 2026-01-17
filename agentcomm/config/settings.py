@@ -49,6 +49,11 @@ class Settings:
                 "auth_token": "",
                 "region": "us"  # Supported regions: us, eu, ap, au, sa, jp, in
             },
+            "orchestration": {
+                "enable_checkpointing": True,
+                "checkpoint_file": "agentcomm/data/checkpoints.db",
+                "auto_cleanup_days": 30
+            },
             "ui": {
                 "theme": "light",
                 "font_size": 12,
@@ -62,6 +67,9 @@ class Settings:
                 "file": "agentcomm.log",
                 "max_size": 1048576,  # 1 MB
                 "backup_count": 3
+            },
+            "mcp": {
+                "enabled_servers": []
             }
         }
         
