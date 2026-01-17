@@ -108,31 +108,42 @@ class LLMRouter:
         prompt: str,
         chat_history: Optional[List[Dict[str, str]]] = None,
         **kwargs
-    ) -> str:
+    ):
         """
         Generate text using the specified provider, returning the complete response
-        
+
         Args:
             provider_name: Name of the provider to use
             prompt: The prompt to send to the LLM
             chat_history: Optional chat history for context
-            **kwargs: Additional provider-specific parameters
-            
+            **kwargs: Additional provider-specific parameters including:
+                - return_tool_calls: If True, returns Dict with 'content' and 'tool_calls'
+                                     If False, returns str with just content
+
         Returns:
-            Complete generated text
+            Complete generated text (str) or structured response (dict) if return_tool_calls=True
         """
         provider = self.get_provider(provider_name)
-        
+
         if provider is None:
             logger.error(f"No provider available for: {provider_name}")
-            return f"Error: No provider available for: {provider_name}"
-        
+            error_msg = f"Error: No provider available for: {provider_name}"
+            if kwargs.get("return_tool_calls", False):
+                return {"content": error_msg, "tool_calls": []}
+            return error_msg
+
         # Add chat history to kwargs if provided
         if chat_history:
             kwargs["chat_history"] = chat_history
-        
+
         response = await provider.generate_complete(prompt, **kwargs)
-        self.last_responses[provider_name] = response
+
+        # Store response (handle both str and dict)
+        if isinstance(response, dict):
+            self.last_responses[provider_name] = response.get("content", "")
+        else:
+            self.last_responses[provider_name] = response
+
         return response
     
     async def generate_stream(
