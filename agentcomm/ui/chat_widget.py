@@ -1151,13 +1151,20 @@ class ChatWidget(QWidget):
         # This ensures the QTextBrowser has the correct width for proper height calculation
         if not is_user:
             def recalculate_height():
-                text_edit = message_widget.findChild(QTextBrowser)
-                if text_edit:
-                    # Force document to recalculate layout with current width
-                    text_edit.document().setTextWidth(text_edit.viewport().width())
-                    doc_height = text_edit.document().size().height()
-                    height = int(doc_height) + 10  # Add extra padding for wrapped content
-                    text_edit.setFixedHeight(height)
+                # Check if the widget still exists before accessing it
+                try:
+                    if message_widget is None:
+                        return
+                    text_edit = message_widget.findChild(QTextBrowser)
+                    if text_edit:
+                        # Force document to recalculate layout with current width
+                        text_edit.document().setTextWidth(text_edit.viewport().width())
+                        doc_height = text_edit.document().size().height()
+                        height = int(doc_height) + 10  # Add extra padding for wrapped content
+                        text_edit.setFixedHeight(height)
+                except RuntimeError:
+                    # Widget has been deleted, ignore
+                    pass
 
             # Use a single-shot timer to recalculate after the widget is rendered
             QTimer.singleShot(0, recalculate_height)
@@ -1274,9 +1281,15 @@ class ChatWidget(QWidget):
         """
         # Ensure loading animation is stopped
         self.loading_indicator.stop_animation()
-        
+
         self.update_streaming_message()
         self._finalize_streaming_message()
+
+        # Re-enable input after message is complete
+        # This handles both streaming and non-streaming LLM responses
+        # For agents with polling/webhooks, input will be re-disabled if needed
+        if self.current_entity_type == "llm":
+            self.set_input_enabled(True)
 
     @pyqtSlot()
     def _stop_update_timer(self):
@@ -1337,6 +1350,11 @@ class ChatWidget(QWidget):
             # No streaming happened (e.g., non-streaming response or error recovery)
             # Add the message normally
             self.add_message_widget(message, sender_id)
+
+            # Re-enable input for LLM responses (tool calling loop case)
+            # Agents will keep input disabled if they're still in working/submitted state
+            if message_type == "llm":
+                self.set_input_enabled(True)
     
     @pyqtSlot(str, str, str)
     def on_streaming_chunk_received(self, sender_id: str, chunk: str, message_type: str):
@@ -1593,7 +1611,8 @@ class ChatWidget(QWidget):
             # Maybe auto-close loading indicator if we want to rely on the button?
             # But the button "Refreshing..." state is good feedback.
             # Let's stop the main indicator after a brief delay so user sees "Checking..." then back to button
-            QTimer.singleShot(1500, self.loading_indicator.stop_animation)
+            # Use lambda to ensure the call happens in the correct thread
+            QTimer.singleShot(1500, lambda: self.loading_indicator.stop_animation())
     
     @pyqtSlot(str)
     def on_error_received(self, error_message: str):
