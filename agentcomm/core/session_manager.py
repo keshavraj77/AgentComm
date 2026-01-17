@@ -14,11 +14,95 @@ from agentcomm.agents.webhook_handler import WebhookHandler
 from agentcomm.agents.ngrok_manager import NgrokManager
 from agentcomm.llm.llm_router import LLMRouter
 from agentcomm.llm.chat_history import ChatHistory
+from agentcomm.llm.tool_prompt_generator import generate_tool_system_prompt
 from agentcomm.core.thread import Thread
 from agentcomm.mcp.mcp_registry import MCPRegistry, MCPServerConfig
 from agentcomm.config.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+def extract_text_from_mcp_result(result: Any) -> str:
+    """
+    Extract text content from MCP CallToolResult
+
+    Args:
+        result: MCP CallToolResult object
+
+    Returns:
+        Extracted text content as string
+    """
+    try:
+        # Check if result has content attribute (CallToolResult)
+        if hasattr(result, 'content') and result.content:
+            # Extract text from all TextContent objects
+            text_parts = []
+            for item in result.content:
+                if hasattr(item, 'text'):
+                    text_parts.append(item.text)
+                elif hasattr(item, 'type') and item.type == 'text' and hasattr(item, 'text'):
+                    text_parts.append(item.text)
+
+            if text_parts:
+                return "\n".join(text_parts)
+
+        # Check if result has isError flag
+        if hasattr(result, 'isError') and result.isError:
+            # Try to extract error message
+            if hasattr(result, 'content') and result.content:
+                for item in result.content:
+                    if hasattr(item, 'text'):
+                        return f"Error: {item.text}"
+            return "Error: Tool execution failed"
+
+        # Fallback: convert to string
+        return str(result)
+
+    except Exception as e:
+        logger.error(f"Error extracting text from MCP result: {e}")
+        return str(result)
+
+
+def validate_conversation_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Validate and fix conversation history to prevent consecutive user messages
+
+    LLMs expect alternating user/assistant messages (with tool messages as exceptions).
+    This function ensures the conversation follows proper format.
+
+    Args:
+        messages: List of message dictionaries
+
+    Returns:
+        Cleaned list of messages with no consecutive user messages
+    """
+    if not messages:
+        return messages
+
+    cleaned = []
+    last_role = None
+    last_content = None
+
+    for i, msg in enumerate(messages):
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        # Allow tool messages to appear after assistant messages
+        if role == "tool":
+            cleaned.append(msg)
+            # Don't update last_role - tool messages don't break the pattern
+            continue
+
+        # Skip EXACT duplicate messages (same role AND same content)
+        if role == last_role and content == last_content and role in ("user", "assistant"):
+            logger.info(f"Skipping exact duplicate {role} message")
+            continue
+
+        cleaned.append(msg)
+        last_role = role
+        last_content = content
+
+    return cleaned
 
 # Maximum number of threads per entity
 MAX_THREADS_PER_ENTITY = 4
@@ -586,7 +670,41 @@ class SessionManager:
                     except Exception as e:
                         logger.error(f"Error getting MCP tools: {e}")
 
-                if stream:
+                # If tools are available, use tool calling loop (non-streaming)
+                if tools and len(tools) > 0:
+                    logger.info(" Tools available - using tool calling loop")
+
+                    # Use tool calling loop
+                    response = await self._handle_tool_calling_loop(
+                        message,
+                        tools,
+                        history,
+                        max_iterations=5
+                    )
+
+                    logger.info(f"Tool calling loop complete. Response length: {len(response)}")
+
+                    # Add user message to history (check for duplicates)
+                    if history and message:
+                        messages = history.get_messages()
+                        # Only add if the last message isn't already this user message
+                        if not messages or messages[-1].get("role") != "user" or messages[-1].get("content") != message:
+                            history.add_user_message(message)
+
+                    # Add LLM response to chat history
+                    if history and response:
+                        history.add_assistant_message(response)
+
+                    # Trigger auto-save
+                    if self.auto_save_callback:
+                        self.auto_save_callback()
+
+                    # Notify callbacks about the LLM response
+                    for callback in self.message_callbacks:
+                        callback(self.current_entity_id, response, "llm")
+
+                # No tools - use standard streaming or non-streaming
+                elif stream:
                     async for chunk in self.llm_router.generate_stream(
                         self.current_entity_id, message, history.get_messages() if history else None,
                         system=self.system_prompt, tools=tools
@@ -687,6 +805,177 @@ class SessionManager:
             logger.error(f"Error resetting thread: {e}")
             self._notify_error(f"Error resetting thread: {e}")
             return False
+
+    async def _handle_tool_calling_loop(
+        self,
+        message: str,
+        tools: List[Dict[str, Any]],
+        history: Optional[ChatHistory],
+        max_iterations: int = 5
+    ) -> str:
+        """
+        Handle tool calling loop for LLM with MCP tools
+
+        Args:
+            message: User message
+            tools: List of available MCP tools
+            history: Chat history
+            max_iterations: Maximum number of tool calling iterations
+
+        Returns:
+            Final response from LLM after tool calling
+        """
+        # Generate tool-aware system prompt
+        enhanced_system_prompt = generate_tool_system_prompt(tools, self.system_prompt)
+        logger.info(f" Starting tool calling loop with {len(tools)} tools (max {max_iterations} iterations)")
+
+        # Build conversation history for tool calling
+        # Make a copy to avoid modifying the original history
+        conversation_history = list(history.get_messages()) if history else []
+
+        # Add the current user message to conversation history
+        # We manage the full conversation in history, so we don't pass message separately
+        if message:
+            conversation_history.append({
+                "role": "user",
+                "content": message
+            })
+
+        iteration = 0
+        final_response = ""
+
+        while iteration < max_iterations:
+            iteration += 1
+            logger.info(f" Tool calling iteration {iteration}/{max_iterations}")
+
+            try:
+                # Validate conversation history to prevent consecutive user messages
+                clean_history = validate_conversation_history(conversation_history)
+
+                # Call LLM with tools (non-streaming for easier parsing)
+                # Pass empty message since everything is in conversation_history
+                response = await self.llm_router.generate(
+                    self.current_entity_id,
+                    "",  # Empty - all context is in conversation_history
+                    clean_history,
+                    system=enhanced_system_prompt,
+                    tools=tools,
+                    return_tool_calls=True
+                )
+
+                # Handle response structure
+                if isinstance(response, dict):
+                    content = response.get("content", "")
+                    tool_calls = response.get("tool_calls", [])
+                else:
+                    # Fallback for providers that don't return structured response
+                    content = response
+                    tool_calls = []
+
+                logger.info(f" LLM response: {len(content)} chars content, {len(tool_calls)} tool calls")
+
+                # If no tool calls, we're done
+                if not tool_calls or len(tool_calls) == 0:
+                    final_response = content
+                    logger.info(" No tool calls - returning final response")
+                    break
+
+                # Add assistant message with tool calls to history
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": content if content else "",
+                    "tool_calls": tool_calls
+                })
+
+                # Execute each tool call
+                tool_results = []
+                for tool_call in tool_calls:
+                    try:
+                        # Extract tool call details
+                        if isinstance(tool_call, dict):
+                            tool_id = tool_call.get("id", f"call_{iteration}_{len(tool_results)}")
+                            tool_function = tool_call.get("function", {})
+                            tool_name = tool_function.get("name", "")
+                            tool_args_str = tool_function.get("arguments", "{}")
+                        else:
+                            logger.warning(f"Unexpected tool_call format: {tool_call}")
+                            continue
+
+                        if not tool_name:
+                            logger.warning("Tool call missing name, skipping")
+                            continue
+
+                        # Parse arguments
+                        import json
+                        try:
+                            tool_args = json.loads(tool_args_str) if isinstance(tool_args_str, str) else tool_args_str
+                        except json.JSONDecodeError:
+                            tool_args = {}
+                            logger.warning(f"Failed to parse tool arguments: {tool_args_str}")
+
+                        logger.info(f"🛠️  Calling tool: {tool_name} with args: {tool_args}")
+
+                        # Notify streaming callbacks about tool execution
+                        for callback in self.streaming_callbacks:
+                            callback(self.current_entity_id, f"<<<STATUS>>>Calling tool: {tool_name}", "llm")
+
+                        # Execute the tool via MCP registry
+                        tool_result = await self.mcp_registry.call_tool(tool_name, tool_args)
+
+                        # Extract text from MCP result
+                        tool_result_text = extract_text_from_mcp_result(tool_result)
+                        logger.info(f" Tool result: {len(tool_result_text)} chars")
+
+                        # Truncate very large tool results for smaller models
+                        # Keep first 10,000 chars to avoid overwhelming small models
+                        MAX_TOOL_RESULT_SIZE = 10000
+                        if len(tool_result_text) > MAX_TOOL_RESULT_SIZE:
+                            original_size = len(tool_result_text)
+                            tool_result_text = tool_result_text[:MAX_TOOL_RESULT_SIZE] + f"\n\n[... Truncated. Original size: {original_size} chars. Showing first {MAX_TOOL_RESULT_SIZE} chars only.]"
+                            logger.warning(f" Tool result truncated from {original_size} to {len(tool_result_text)} chars for model compatibility")
+
+                        # Add tool result to conversation
+                        tool_results.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "name": tool_name,
+                            "content": tool_result_text
+                        })
+
+                    except Exception as e:
+                        logger.error(f"❌ Error executing tool {tool_name}: {e}")
+                        error_msg = f"Error executing tool: {str(e)}"
+                        tool_results.append({
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "name": tool_name,
+                            "content": error_msg
+                        })
+
+                # Add all tool results to conversation
+                conversation_history.extend(tool_results)
+                logger.info(f" Added {len(tool_results)} tool result(s) to conversation history")
+
+                # Clear the status message
+                for callback in self.streaming_callbacks:
+                    callback(self.current_entity_id, "<<<CLEAR>>>", "llm")
+
+                # Continue to next iteration - LLM will process tool results
+                # conversation_history now contains: [..., assistant with tool_calls, tool results]
+                # Next iteration will pass this full history to LLM
+
+            except Exception as e:
+                logger.error(f"Error in tool calling loop iteration {iteration}: {e}")
+                final_response = f"Error during tool calling: {str(e)}"
+                break
+
+        # If we hit max iterations, return last content
+        if iteration >= max_iterations and not final_response:
+            logger.warning(f" Hit max iterations ({max_iterations}), returning last response")
+            final_response = content if content else "Max iterations reached without final response"
+
+        logger.info(f"🏁 Tool calling loop finished. Returning response: {len(final_response)} chars")
+        return final_response
 
     def _notify_error(self, error_message: str) -> None:
         """
