@@ -1,5 +1,8 @@
+import logging
 from mcp import ClientSession
 from mcp.types import Tool, Resource, Prompt
+
+logger = logging.getLogger(__name__)
 
 
 class MCPClient:
@@ -12,19 +15,33 @@ class MCPClient:
         self.is_connected = False
 
     async def initialize(self):
+        # Note: Session context is managed by the transport client (StdioMCPClient/SSEMCPClient)
         await self.session.initialize()
         self.is_connected = True
         await self._discover_capabilities()
 
     async def _discover_capabilities(self):
-        tools_result = await self.session.list_tools()
-        self.tools = tools_result.tools if tools_result else []
+        # Try to discover tools - handle servers that don't support each method
+        try:
+            tools_result = await self.session.list_tools()
+            self.tools = tools_result.tools if tools_result else []
+        except Exception as e:
+            logger.warning(f"Could not list tools from {self.server_id}: {e}")
+            self.tools = []
 
-        resources_result = await self.session.list_resources()
-        self.resources = resources_result.resources if resources_result else []
+        try:
+            resources_result = await self.session.list_resources()
+            self.resources = resources_result.resources if resources_result else []
+        except Exception as e:
+            logger.warning(f"Could not list resources from {self.server_id}: {e}")
+            self.resources = []
 
-        prompts_result = await self.session.list_prompts()
-        self.prompts = prompts_result.prompts if prompts_result else []
+        try:
+            prompts_result = await self.session.list_prompts()
+            self.prompts = prompts_result.prompts if prompts_result else []
+        except Exception as e:
+            logger.warning(f"Could not list prompts from {self.server_id}: {e}")
+            self.prompts = []
 
     async def call_tool(self, tool_name: str, arguments: dict):
         if not self.is_connected:

@@ -47,6 +47,19 @@ class MCPRegistry:
             if not config:
                 raise ValueError(f"Server {server_id} not found")
 
+            # Validate required environment variables
+            if config.env:
+                missing_vars = []
+                for key, value in config.env.items():
+                    if not value or value.strip() == "":
+                        missing_vars.append(key)
+                
+                if missing_vars:
+                    raise ValueError(
+                        f"MCP server '{config.name}' ({server_id}) requires environment variables: {', '.join(missing_vars)}. "
+                        f"Please configure them in the MCP settings."
+                    )
+
             if config.transport == "stdio":
                 if not config.command or not config.args:
                     raise ValueError("stdio transport requires command and args")
