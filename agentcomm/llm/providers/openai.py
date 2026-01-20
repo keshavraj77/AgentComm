@@ -125,17 +125,19 @@ class OpenAIProvider(LLMProvider):
             logger.error(f"Error generating text from OpenAI (streaming): {e}", exc_info=True)
             yield f"Error: {e}"
 
-    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> str:
+    async def generate_complete(self, prompt: str, tools: Optional[List[Dict[str, Any]]] = None, **kwargs):
         """
         Generate text from OpenAI, returning complete response
 
         Args:
             prompt: The prompt to send to model
             tools: Optional list of tools/functions available to LLM
-            **kwargs: Additional parameters to pass to API
+            **kwargs: Additional parameters including:
+                - return_tool_calls: If True, returns Dict[str, Any] with 'content' and 'tool_calls'
+                                     If False, returns str with just content
 
         Returns:
-            Complete generated text
+            Complete generated text (str) or structured response (dict) depending on return_tool_calls
         """
         if not self.client:
             logger.error("OpenAI client not initialized. Please install the openai package.")
@@ -146,6 +148,8 @@ class OpenAIProvider(LLMProvider):
             return "Error: OpenAI API key not provided. Please provide a valid API key."
 
         try:
+            return_tool_calls = kwargs.get("return_tool_calls", False)
+            
             # Prepare parameters
             model = kwargs.get("model", self.default_model)
             params = self.default_params.copy()
@@ -169,10 +173,30 @@ class OpenAIProvider(LLMProvider):
             history = kwargs.get("history") or kwargs.get("chat_history")
             if history and isinstance(history, list):
                 logger.debug(f"Chat history provided with {len(history)} messages")
-                messages.extend(history)
+                for msg in history:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    
+                    # Handle tool result messages
+                    if role == "tool":
+                        messages.append({
+                            "role": "tool",
+                            "content": content,
+                            "tool_call_id": msg.get("tool_call_id", ""),
+                            "name": msg.get("name", "")
+                        })
+                    # Handle assistant messages with tool calls
+                    elif role == "assistant":
+                        msg_dict = {"role": "assistant", "content": content}
+                        if "tool_calls" in msg:
+                            msg_dict["tool_calls"] = msg["tool_calls"]
+                        messages.append(msg_dict)
+                    else:
+                        messages.append({"role": role, "content": content})
 
-            # Add current user message
-            messages.append({"role": "user", "content": prompt})
+            # Add current user message (only if not empty - for tool calling loop)
+            if prompt:
+                messages.append({"role": "user", "content": prompt})
 
             # Prepare API call parameters
             api_params = {
@@ -183,24 +207,58 @@ class OpenAIProvider(LLMProvider):
             }
 
             # Add tools if provided
-            if tools:
+            if tools and len(tools) > 0:
                 api_params["tools"] = tools
                 api_params["tool_choice"] = "auto"
 
             # Create completion
             response = self.client.chat.completions.create(**api_params)
 
-            # Extract content
-            result = response.choices[0].message.content
-
-            logger.info(f"OpenAI response complete. Response length: {len(result)}")
-            logger.debug(f"Response: {result[:200]}...")
-
-            return result
+            # Extract content and tool calls
+            message = response.choices[0].message
+            content = message.content or ""
+            tool_calls = message.tool_calls or []
+            
+            # Convert tool_calls to dict format if present
+            tool_calls_list = []
+            if tool_calls:
+                for tc in tool_calls:
+                    tool_calls_list.append({
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    })
+            
+            # Return structured response if tool calls requested
+            if return_tool_calls:
+                return {
+                    "content": content,
+                    "tool_calls": tool_calls_list
+                }
+            
+            # Otherwise return just content
+            if content:
+                logger.info(f"OpenAI response complete. Response length: {len(content)}")
+                logger.debug(f"Response: {content[:200]}...")
+                return content
+            
+            # If only tool calls, indicate that
+            if tool_calls_list:
+                return "[Tool calls requested - use return_tool_calls=True to access them]"
+            
+            if return_tool_calls:
+                return {"content": "Error: Could not extract content from response", "tool_calls": []}
+            return "Error: Could not extract content from response"
 
         except Exception as e:
             logger.error(f"Error generating text from OpenAI (complete): {e}", exc_info=True)
-            return f"Error: {e}"
+            error_msg = f"Error: {e}"
+            if kwargs.get("return_tool_calls", False):
+                return {"content": error_msg, "tool_calls": []}
+            return error_msg
 
     @property
     def available_models(self) -> List[str]:
